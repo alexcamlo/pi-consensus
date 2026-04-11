@@ -6,6 +6,8 @@
   "private": true,
   "scripts": {
     "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/**/*.test.ts",
     "build": "tsc --noEmit",
     "clean": "echo 'nothing to clean'",
     "sandcastle": "npx tsx .sandcastle/main.mts"
