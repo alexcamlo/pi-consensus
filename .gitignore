@@ -1,2 +1,9 @@
 node_modules/
 *.tsbuildinfo
+
+.pi/suggester/
+.sandcastle/.runtime/
+.sandcastle/logs/
+.sandcastle/worktrees/
+.sandcastle/.env
+.sandcastle-pi-auth.json
