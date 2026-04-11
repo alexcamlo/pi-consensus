@@ -1,0 +1,118 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "8782ccdd",
+    "suggestionShownAt": "2026-04-11T08:52:40.519Z",
+    "userPromptSubmittedAt": "2026-04-11T08:53:56.794Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "4742dce7",
+      "suggestedPrompt": "Opt-in via `/consensus <prompt>`. Proceed.",
+      "actualUserPrompt": "Opt-in via `/consensus <prompt>`. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:42:02.191Z"
+    },
+    {
+      "turnId": "46b1e3fe",
+      "suggestedPrompt": "C.",
+      "actualUserPrompt": "C.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:42:55.309Z"
+    },
+    {
+      "turnId": "ca9c3855",
+      "suggestedPrompt": "D.",
+      "actualUserPrompt": "D.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:43:50.695Z"
+    },
+    {
+      "turnId": "35016d72",
+      "suggestedPrompt": "D. Default to A for v1.",
+      "actualUserPrompt": "D. Default to A for v1.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:48:23.313Z"
+    },
+    {
+      "turnId": "092011e0",
+      "suggestedPrompt": "A. Hard cap 6. Proceed.",
+      "actualUserPrompt": "a",
+      "classification": "changed_course",
+      "similarity": 0.14166666666666666,
+      "timestamp": "2026-04-11T08:48:56.486Z"
+    },
+    {
+      "turnId": "eb834352",
+      "suggestedPrompt": "A. Minimum 2. Proceed.",
+      "actualUserPrompt": "A. Minimum 2. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:49:05.421Z"
+    },
+    {
+      "turnId": "9fe4ce95",
+      "suggestedPrompt": "B. Proceed.",
+      "actualUserPrompt": "B. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:49:26.282Z"
+    },
+    {
+      "turnId": "fd094370",
+      "suggestedPrompt": "A. Proceed.",
+      "actualUserPrompt": "A. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:49:41.794Z"
+    },
+    {
+      "turnId": "4620aec6",
+      "suggestedPrompt": "B. Proceed.",
+      "actualUserPrompt": "B. with a percentage of agreement or disagreement",
+      "classification": "changed_course",
+      "similarity": 0.20555555555555555,
+      "timestamp": "2026-04-11T08:50:44.220Z"
+    },
+    {
+      "turnId": "a1b8a865",
+      "suggestedPrompt": "C. Proceed.",
+      "actualUserPrompt": "C. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:51:20.043Z"
+    },
+    {
+      "turnId": "a94244fd",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:51:54.855Z"
+    },
+    {
+      "turnId": "9e36f485",
+      "suggestedPrompt": "A. Proceed.",
+      "actualUserPrompt": "A. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:52:32.648Z"
+    },
+    {
+      "turnId": "8782ccdd",
+      "suggestedPrompt": "D. Default to A for v1.",
+      "actualUserPrompt": "The never should edit anything. only read tools and non-editable bash commands like ls, greo, find...",
+      "classification": "changed_course",
+      "similarity": 0.12096774193548387,
+      "timestamp": "2026-04-11T08:53:56.794Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 3
+}

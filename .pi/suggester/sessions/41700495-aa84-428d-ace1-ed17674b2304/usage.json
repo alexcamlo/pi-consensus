@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "suggestionUsage": {
+    "calls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "totalTokens": 0,
+    "costTotal": 0
+  },
+  "seederUsage": {
+    "calls": 1,
+    "inputTokens": 8501,
+    "outputTokens": 3496,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "totalTokens": 11997,
+    "costTotal": 0.0736925,
+    "last": {
+      "inputTokens": 8501,
+      "outputTokens": 3496,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 11997,
+      "costTotal": 0.0736925
+    }
+  },
+  "updatedAt": "2026-04-11T08:27:00.212Z"
+}

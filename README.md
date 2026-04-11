@@ -63,4 +63,27 @@ Not allowed:
 
 ## Status
 
-Planning complete. Implementation not started.
+Repository scaffolded as a pi extension package. Consensus runtime not implemented yet.
+
+## Repo layout
+
+- `src/index.ts` — extension entrypoint
+- `src/config.ts` — initial config types
+- `.pi/extensions/pi-consensus.ts` — project-local auto-discovery shim for pi
+- `package.json` — pi package metadata + scripts
+- `tsconfig.json` — TypeScript config for local typechecking
+
+## Local usage
+
+```bash
+npm install
+npm run check
+```
+
+Then either:
+
+```bash
+pi -e ./src/index.ts
+```
+
+or run pi in this repo and let the project-local shim auto-load from `.pi/extensions/pi-consensus.ts`.

@@ -1,0 +1,26 @@
+{
+  "name": "pi-consensus",
+  "version": "0.1.0",
+  "description": "A pi extension for multi-model consensus.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "clean": "echo 'nothing to clean'",
+    "sandcastle": "npx tsx .sandcastle/main.mts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.66.1",
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  }
+}

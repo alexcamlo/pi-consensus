@@ -1,0 +1,87 @@
+{
+  "seedVersion": 3,
+  "generatedAt": "2026-04-11T12:32:18.360Z",
+  "sourceCommit": "faba947f75d8fe6d32ea1f92351bd066aaac730f",
+  "generatorVersion": "2026-03-11.2",
+  "seederPromptVersion": "2026-03-11.2",
+  "suggestionPromptVersion": "2026-03-11.1",
+  "configFingerprint": "sha256:1c8240f0803f32e5bd8896c2fabd508516dbefbc88d624d285ba5069a7cccf1a",
+  "projectIntentSummary": "pi-consensus is a specification-first repository for a global Pi extension that adds an opt-in `/consensus <prompt>` workflow. Its purpose is to improve trust and quality in model-assisted planning, architecture, and implementation tasks by consulting multiple models on the same prompt, keeping their first-pass reasoning independent, and then synthesizing a single final result that explicitly communicates where the models agree, disagree, or remain unclear.\n\nThe main product intent is evidenced in both `README.md` and `v1-PRD.md`. The README defines the user-facing behavior: `/consensus <prompt>` sends the same prompt to multiple configured models in parallel and returns a final answer with a consensus recommendation, agreement/disagreement/unclear percentages, confidence, agreed points, disagreement points, and participant/exclusion details. The PRD clarifies the motivating problem: one model may provide only one plausible approach, while the desired workflow is to have several models independently evaluate the same prompt, inspect repository context when needed, and contribute to a final consensus answer with explicit analysis of alignment and divergence.\n\nThe project is clearly intended to fit into the Pi ecosystem as a global extension rather than a standalone app. It should support project-level and global configuration, register a `/consensus` command, likely register a `consensus` tool for persistence, and render output appropriately for both interactive and non-interactive contexts. It is not meant to replace standard Pi behavior; it is a deliberate, opt-in workflow for cases where multi-model comparison is valuable.\n\nA defining part of the project’s identity is safety. Both docs emphasize that v1 must be read-only: participants may inspect the repo using a limited toolset but must never write or edit files, and synthesis should run without repo inspection tools. Another defining intent is transparency: the system should not just produce an answer, but also surface confidence, agreement percentages, supporting and conflicting points, and excluded participants. Overall, the repository’s intent is to design and eventually implement a safe, configurable, Pi-native multi-model consensus extension for repo-aware analysis and decision support.",
+  "objectivesSummary": "The primary objective is to implement `/consensus <prompt>` as an opt-in command in Pi. According to the README and PRD, that command should run the same prompt across 2 or more configured participant models in parallel, preserve independence of their first-pass outputs, and then run a configurable synthesis pass that produces one final consensus answer.\n\nA major objective is configurability. The extension should support configurable participant models and a configurable synthesis model through settings files, using all configured participant models as the participant set. The PRD defines concrete config locations: project-local `.pi/consensus.json` and global `~/.pi/agent/consensus.json`, with project config taking exclusive precedence if present. The schema should support both string and object model references and include options like participant/synthesis thinking levels and timeouts.\n\nAnother objective is repo-aware analysis under safe limits. Participant models should be able to inspect repository context when the prompt depends on code or project structure, but only via read-only inspection tools. Their prompts should answer the user directly, inspect the repo when relevant, provide a recommended approach, explain why, identify risks/tradeoffs, and state confidence. This shows the extension is intended for substantive engineering and planning use cases rather than simple opinion polling.\n\nThe project also aims for robust execution quality. Requirements include model validation against the Pi model registry, deduplication of duplicate participant entries, enforcement of a minimum of two unique participant models, isolated execution in separate `pi` subprocesses, filtering of failed or unusable outputs, and continuation only when at least two usable outputs remain.\n\nThe final output shape is itself an objective. The synthesis must include a consensus answer, overall agreement/disagreement/unclear percentages summing to 100, confidence percent plus label, agreed points, disagreements, participants, and excluded participants. The extension should also support interactive progress UI with per-model status and a plain-text/markdown fallback in non-interactive mode. Persistence is another objective: ideally the final artifact should be stored Pi-natively as a real tool result rather than ordinary assistant prose.",
+  "constraintsSummary": "The strongest documented constraint is read-only operation. The README says the extension is intended to be read-only, and the PRD formalizes that no model run may edit files. Allowed participant tools in v1 are limited to `read`, `ls`, `find`, `grep`, and `multi_grep`. Explicitly disallowed are `edit`, `write`, destructive tools, and raw or unrestricted `bash`. Synthesis gets no tools in v1. This is both a product and architectural constraint that bounds the system to safe inspection rather than mutation.\n\nScope is intentionally narrow. `/consensus` is opt-in and must not automatically replace normal Pi behavior. The PRD explicitly excludes image input, multi-round debate, per-model custom prompts, synthesis repo inspection, config merging between project and global settings, and command flags in v1. These exclusions keep the first release focused and reduce complexity.\n\nConfiguration behavior is also tightly constrained. The project config path is `.pi/consensus.json` and the global path is `~/.pi/agent/consensus.json`. Resolution is exclusive rather than merged: if project config exists, it is used exclusively; otherwise the global config is used; otherwise the run errors. At least two unique participant models are required after deduplication. The implementation should hard-cap participant count for safety, validate configured models against the Pi model registry, and fall back to the current Pi model for synthesis if the configured synthesis model is invalid or missing.\n\nExecution is constrained by isolation and a fixed workflow. Participants must run in separate `pi` subprocesses, must not see each other’s outputs, and the workflow order is defined as validate config/models, run participants in parallel, filter unusable outputs, run synthesis, then render/persist the result. Consensus may continue only if at least two usable participant outputs remain.\n\nThe output is constrained structurally as well. Required synthesis fields are enumerated, percentages must sum to 100, and normal plus expanded/debug views have specific content expectations. Interactive mode should show validation, participant statuses, and synthesis progress, while non-interactive mode must still return a usable plain text/markdown result.\n\nA final practical constraint is maturity: the repo is still planning-only. README explicitly says implementation has not started, and no source or manifest files have been confirmed. So current understanding is based on specification docs rather than implementation evidence.",
+  "principlesGuidelinesSummary": "The repository contains strong product and behavior guidelines, even though it does not show a separate contributor handbook or code-style guide in the explored files. The clearest principle is safety through read-only execution. Both `README.md` and `v1-PRD.md` repeatedly emphasize that participants may inspect the repo but never modify it. The participant tool allowlist and denylist act as explicit operating policy, and synthesis having no tools in v1 further reinforces conservative boundaries.\n\nA second core principle is independence before synthesis. The docs consistently state that first-pass participant responses must remain independent and that participants must not see each other’s outputs. The PRD strengthens this by requiring separate `pi` subprocesses for isolation. This reflects a deliberate epistemic guideline: gather genuinely independent model perspectives before aggregating them.\n\nA third principle is transparency over black-box aggregation. The required output includes agreement/disagreement/unclear percentages, confidence, agreed points, disagreements, participants, and exclusions. The expanded/debug view should reveal raw participant outputs and usability/exclusion reasons. This shows a design philosophy of making the consensus process inspectable, debuggable, and trustworthy.\n\nA fourth principle is deterministic configuration behavior. Project config fully overrides global config with no merge behavior. The docs also prescribe normalization of model refs, validation against the Pi model registry, duplicate warnings, and explicit fallback behavior for synthesis model selection. These conventions favor predictability and low ambiguity.\n\nA fifth principle is graceful usability across environments. Interactive mode should show live progress and per-model status, while non-interactive mode should still function with plain markdown/text output. Participant responses should use light structured markdown, whereas synthesis returns structured JSON internally and the extension renders human-readable results. This suggests a guideline of machine-structured internals paired with readable user-facing output.\n\nThere is no explored evidence of general repository engineering conventions such as lint rules, formatter settings, branching policy, or CONTRIBUTING documentation. So the documented principles are primarily behavioral, safety, UX, and architecture conventions defined in the README and PRD.",
+  "implementationStatusSummary": "The project is currently in planning/specification, not implementation. `README.md` explicitly states: “Planning complete. Implementation not started.” The repository listing provided in the exploration shows only `README.md` and `v1-PRD.md` at the root besides metadata directories, and no application source files, package manifests, or runnable entrypoints have been confirmed.\n\nWhat does exist is a detailed implementation plan in the PRD. It covers scaffolding a global extension, config and validation, participant subprocess execution, usability filtering, consensus synthesis, rendering and persistence, and hardening for timeouts and duplicate handling. So the repo is best described as well-specified but pre-code.",
+  "topObjectives": [
+    "Add an opt-in `/consensus <prompt>` command as a global Pi extension",
+    "Run all configured participant models in parallel with isolated first-pass responses",
+    "Allow repo-aware analysis through read-only inspection tools only",
+    "Synthesize a final consensus answer with explicit agreement, disagreement, unclear percentages, and confidence",
+    "Support configurable participant and synthesis models with project config fully overriding global config",
+    "Provide interactive progress UI with plain-text/markdown fallback",
+    "Persist results in a Pi-native way, ideally as a real tool result"
+  ],
+  "constraints": [
+    "Extension must be read-only; no participant may edit repository files",
+    "Participant tools are limited to read, ls, find, grep, and multi_grep",
+    "edit, write, destructive tools, and raw/unrestricted bash are disallowed",
+    "Synthesis gets no tools in v1",
+    "At least 2 unique participant models are required after deduplication",
+    "Project config `.pi/consensus.json` exclusively overrides global config `~/.pi/agent/consensus.json`; there is no merge behavior",
+    "v1 excludes image input, multi-round debate, per-model custom prompts, synthesis repo inspection, and command flags",
+    "Consensus can continue only if at least 2 usable participant outputs remain",
+    "Output must include required structured fields and agreement/disagreement/unclear must sum to 100",
+    "Repository is currently planning-only; implementation has not started"
+  ],
+  "keyFiles": [
+    {
+      "path": "README.md",
+      "hash": "sha256:4fdd45c5d0971039b1d6966839ee0c4d31095f8517730f9911bdab396326c8f7",
+      "whyImportant": "Documents the participant tool allowlist/denylist and reinforces read-only behavioral constraints",
+      "category": "principles_guidelines"
+    },
+    {
+      "path": "v1-PRD.md",
+      "hash": "sha256:d50a4c81265ce4e2b711e0a0d66aae1aa4343861932c6790061afba108bfe005",
+      "whyImportant": "Main principles/guidelines source for read-only safety, no-tool synthesis, transparency/debuggability, deterministic config override, and v1 non-goals",
+      "category": "principles_guidelines"
+    }
+  ],
+  "categoryFindings": {
+    "vision": {
+      "found": true,
+      "rationale": "Both README.md and v1-PRD.md were read and explicitly define the project purpose, problem, goals, and user-visible outcomes for the Pi consensus extension.",
+      "files": [
+        "/Users/win/Developer/pi-consensus/README.md",
+        "/Users/win/Developer/pi-consensus/v1-PRD.md"
+      ]
+    },
+    "architecture": {
+      "found": true,
+      "rationale": "README.md provides the top-level system flow, and v1-PRD.md provides detailed architecture-level requirements including global extension scope, config resolution, participant subprocess isolation, execution phases, tool access rules, synthesis behavior, rendering, persistence, and an implementation plan.",
+      "files": [
+        "/Users/win/Developer/pi-consensus/README.md",
+        "/Users/win/Developer/pi-consensus/v1-PRD.md"
+      ]
+    },
+    "principles_guidelines": {
+      "found": true,
+      "rationale": "No separate style/contributing guide was found in explored files, but README.md and v1-PRD.md contain explicit operating principles and conventions: read-only safety, tool restrictions, independence of first-pass outputs, transparency/debug views, and deterministic config precedence.",
+      "files": [
+        "/Users/win/Developer/pi-consensus/README.md",
+        "/Users/win/Developer/pi-consensus/v1-PRD.md"
+      ]
+    }
+  },
+  "openQuestions": [
+    "What source layout, language, and package/runtime tooling will be chosen once implementation begins?",
+    "How exactly should heuristic filtering and synthesis/judging determine whether a participant output is usable?",
+    "How will agreement/disagreement/unclear percentages and confidence labels be computed reliably from participant outputs?",
+    "What hard cap on participant count should be enforced for safety and cost control?",
+    "Can Pi commands directly create real tool-result artifacts, or will a workaround assistant tool call be required?",
+    "What should the exact schema validation and user-facing error messages look like for `.pi/consensus.json`?",
+    "How should raw participant outputs and debug details be persisted and exposed in the expanded view?"
+  ],
+  "reseedNotes": "Repository evidence for vision, architecture, and principles is strong because both root docs were read. Current conclusions are still specification-based rather than implementation-based, since no source files or manifests were found in the explored history. If implementation begins later, reseeding should prioritize discovering extension entrypoints, config/schema validation code, subprocess orchestration, synthesis/rendering logic, and any actual persistence integration to replace PRD-based assumptions with code evidence.",
+  "lastReseedReason": "initial_missing",
+  "lastChangedFiles": []
+}

@@ -1,0 +1,22 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "4742dce7",
+    "suggestionShownAt": "2026-04-11T08:41:19.328Z",
+    "userPromptSubmittedAt": "2026-04-11T08:42:02.191Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "4742dce7",
+      "suggestedPrompt": "Opt-in via `/consensus <prompt>`. Proceed.",
+      "actualUserPrompt": "Opt-in via `/consensus <prompt>`. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:42:02.191Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 1
+}

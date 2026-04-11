@@ -1,0 +1,14 @@
+{
+  "stateVersion": 9,
+  "steeringHistory": [
+    {
+      "turnId": "eb10adac",
+      "suggestedPrompt": "continue",
+      "actualUserPrompt": "/skill:grill-me i want to create a pi extension where i send a prompt a 2 or 3 different models discuss between them the best approach. the first idea should be parallel for the models to avoid they agree with each other. also, the models should be configurable via settings. depending on how many midels are set in settings that should be the number of models to reach consensus",
+      "classification": "changed_course",
+      "similarity": 0.020671834625323,
+      "timestamp": "2026-04-11T08:34:04.883Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 2
+}

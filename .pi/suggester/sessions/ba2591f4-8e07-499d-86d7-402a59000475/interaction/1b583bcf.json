@@ -1,0 +1,174 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "1b583bcf",
+    "suggestionShownAt": "2026-04-11T11:03:44.897Z",
+    "userPromptSubmittedAt": "2026-04-11T11:04:06.354Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "f6718fd5",
+      "suggestedPrompt": "C. Proceed.",
+      "actualUserPrompt": "C. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T08:59:49.398Z"
+    },
+    {
+      "turnId": "41490a01",
+      "suggestedPrompt": "A. Proceed.",
+      "actualUserPrompt": "A. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T09:00:23.757Z"
+    },
+    {
+      "turnId": "d06d9ba5",
+      "suggestedPrompt": "A. Proceed.",
+      "actualUserPrompt": "A. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T09:00:41.801Z"
+    },
+    {
+      "turnId": "09def563",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T09:01:04.755Z"
+    },
+    {
+      "turnId": "0258889a",
+      "suggestedPrompt": "C. Proceed.",
+      "actualUserPrompt": "B",
+      "classification": "changed_course",
+      "similarity": 0,
+      "timestamp": "2026-04-11T09:01:45.970Z"
+    },
+    {
+      "turnId": "04808d14",
+      "suggestedPrompt": "A. Proceed.",
+      "actualUserPrompt": "if there is a project specific consensus.json it should have higher priority than global. not merge",
+      "classification": "changed_course",
+      "similarity": 0.11868686868686869,
+      "timestamp": "2026-04-11T09:03:01.658Z"
+    },
+    {
+      "turnId": "e1966c11",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T09:06:17.176Z"
+    },
+    {
+      "turnId": "6e907b4b",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T09:10:01.581Z"
+    },
+    {
+      "turnId": "e7469c85",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:56:46.168Z"
+    },
+    {
+      "turnId": "21422080",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:57:23.839Z"
+    },
+    {
+      "turnId": "3ea3da6b",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:57:54.072Z"
+    },
+    {
+      "turnId": "284b49d3",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:58:32.377Z"
+    },
+    {
+      "turnId": "2ae32954",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:59:05.893Z"
+    },
+    {
+      "turnId": "0855c929",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:59:36.476Z"
+    },
+    {
+      "turnId": "e04b1869",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:00:12.248Z"
+    },
+    {
+      "turnId": "4c2eb546",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:00:26.594Z"
+    },
+    {
+      "turnId": "0dc6af34",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:01:52.366Z"
+    },
+    {
+      "turnId": "ba21ada1",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:02:04.450Z"
+    },
+    {
+      "turnId": "62ac0daf",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:03:18.877Z"
+    },
+    {
+      "turnId": "1b583bcf",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:04:06.354Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 7
+}

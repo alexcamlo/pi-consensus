@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "3ae1909b-b524-4383-97fe-f41c5f560666",
+  "sessionFile": "/Users/win/.pi/agent/sessions/--Users-win-Developer-pi-consensus--/2026-04-11T08-18-44-214Z_3ae1909b-b524-4383-97fe-f41c5f560666.jsonl",
+  "cwd": "/Users/win/Developer/pi-consensus",
+  "ignoreLegacyPiSessionEntries": true,
+  "legacyMigration": {
+    "performedAt": "2026-04-11T08:18:46.655Z",
+    "importedLegacyEntries": false,
+    "legacyStateEntryCount": 0,
+    "legacyUsageEntryCount": 0,
+    "note": "Legacy suggester-state/suggester-usage pi session entries were imported once into extension-owned storage and are ignored afterwards."
+  }
+}

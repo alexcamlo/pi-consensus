@@ -1,0 +1,166 @@
+{
+  "stateVersion": 9,
+  "steeringHistory": [
+    {
+      "turnId": "284b49d3",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:58:32.377Z"
+    },
+    {
+      "turnId": "2ae32954",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:59:05.893Z"
+    },
+    {
+      "turnId": "0855c929",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T10:59:36.476Z"
+    },
+    {
+      "turnId": "e04b1869",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:00:12.248Z"
+    },
+    {
+      "turnId": "4c2eb546",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:00:26.594Z"
+    },
+    {
+      "turnId": "0dc6af34",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:01:52.366Z"
+    },
+    {
+      "turnId": "ba21ada1",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:02:04.450Z"
+    },
+    {
+      "turnId": "62ac0daf",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:03:18.877Z"
+    },
+    {
+      "turnId": "1b583bcf",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "C",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:04:06.354Z"
+    },
+    {
+      "turnId": "db387488",
+      "suggestedPrompt": "C",
+      "actualUserPrompt": "a",
+      "classification": "changed_course",
+      "similarity": 0,
+      "timestamp": "2026-04-11T11:04:48.284Z"
+    },
+    {
+      "turnId": "9b8f1e41",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:05:55.126Z"
+    },
+    {
+      "turnId": "b87b1f91",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:06:26.775Z"
+    },
+    {
+      "turnId": "ded2405a",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:07:03.317Z"
+    },
+    {
+      "turnId": "d259b75c",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:08:05.966Z"
+    },
+    {
+      "turnId": "dc555612",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:08:44.135Z"
+    },
+    {
+      "turnId": "df5f5b75",
+      "suggestedPrompt": "D. Proceed.",
+      "actualUserPrompt": "D. Proceed.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:09:56.322Z"
+    },
+    {
+      "turnId": "99dc6c22",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "B",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:33:26.659Z"
+    },
+    {
+      "turnId": "af1cd9ba",
+      "suggestedPrompt": "B",
+      "actualUserPrompt": "whatever is the best for pi extension",
+      "classification": "changed_course",
+      "similarity": 0.02631578947368421,
+      "timestamp": "2026-04-11T11:34:57.076Z"
+    },
+    {
+      "turnId": "7322c788",
+      "suggestedPrompt": "Yes.",
+      "actualUserPrompt": "Yes.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:35:32.639Z"
+    },
+    {
+      "turnId": "a9bc348d",
+      "suggestedPrompt": "A",
+      "actualUserPrompt": "A",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-04-11T11:35:57.807Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 0
+}
