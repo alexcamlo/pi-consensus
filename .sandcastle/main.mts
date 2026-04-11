@@ -7,18 +7,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 const PI_AUTH_RUNTIME_PATH = ".sandcastle-pi-auth.json";
 const SANDBOX_PI_AUTH_PATH = "/home/agent/.pi/agent/auth.json";
-const SANDBOX_SEED_PATHS = [
-  PI_AUTH_RUNTIME_PATH,
-  ".gitignore",
-  ".pi",
-  ".sandcastle",
-  "README.md",
-  "package-lock.json",
-  "package.json",
-  "src",
-  "tsconfig.json",
-  "v1-PRD.md",
-];
+const SANDBOX_SEED_PATHS = [PI_AUTH_RUNTIME_PATH];
 
 const shellEscape = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
