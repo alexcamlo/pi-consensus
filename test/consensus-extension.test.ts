@@ -6,6 +6,7 @@ import test from "node:test";
 
 import consensusExtension from "../src/index.ts";
 import { createConsensusExecutionResult } from "../src/result.ts";
+import type { SynthesisExecutionResult } from "../src/synthesis.ts";
 
 test("createConsensusExecutionResult returns read-only filtering details", () => {
   const result = createConsensusExecutionResult(
@@ -59,7 +60,7 @@ test("createConsensusExecutionResult returns read-only filtering details", () =>
   assert.ok(result.details.nextSteps.length >= 2);
 });
 
-test("consensus command validates config, runs participants, prefers project config, and reports warnings", async () => {
+test("consensus command validates config, runs synthesis with full participant outputs, prefers project config, and reports warnings", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-project-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-"));
 
@@ -89,6 +90,7 @@ test("consensus command validates config, runs participants, prefers project con
 
   const harness = createExtensionHarness();
   const participantInvocations: Array<{ model: string; cwd: string; prompt: string; allowedTools: string[]; systemPrompt: string }> = [];
+  const synthesisInvocations: Array<{ model: string; cwd: string; prompt: string; allowedTools: string[]; systemPrompt: string }> = [];
   consensusExtension(harness.pi as never, {
     executeParticipantInvocation: async (invocation) => {
       participantInvocations.push({
@@ -108,6 +110,52 @@ test("consensus command validates config, runs participants, prefers project con
         toolNamesUsed: ["read"],
       };
     },
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => {
+      synthesisInvocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        cwd: invocation.cwd,
+        prompt: invocation.prompt,
+        allowedTools: invocation.allowedTools,
+        systemPrompt: invocation.systemPrompt,
+      });
+
+      return {
+        model: invocation.model,
+        output: {
+          consensusAnswer: "Use the incremental migration plan.",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 78,
+          confidenceLabel: "medium",
+          agreedPoints: [
+            {
+              point: "Roll out the migration incrementally.",
+              supportPercent: 100,
+              supportingParticipants: 2,
+              totalParticipants: 2,
+            },
+          ],
+          disagreements: [
+            {
+              point: "Whether to automate the final cleanup immediately.",
+              summary: "One model prefers delaying cleanup until after validation.",
+            },
+          ],
+          participants: [
+            {
+              model: "anthropic/claude-sonnet-4-5",
+              summary: "Recommended an incremental rollout.",
+            },
+            {
+              model: "openai/gpt-5",
+              summary: "Also recommended an incremental rollout.",
+            },
+          ],
+          excludedParticipants: [],
+        },
+      };
+    },
   });
 
   const commandContext = createCommandContext(projectDir, [
@@ -123,11 +171,13 @@ test("consensus command validates config, runs participants, prefers project con
   assert.equal(harness.sentMessages.length, 1);
   assert.match(harness.sentMessages[0]?.content ?? "", /Config: .*\.pi\/consensus\.json/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Synthesis model: openai\/gpt-5/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Participant results:/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Consensus answer: Use the incremental migration plan\./);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Agreement: 70% \| Disagreement: 20% \| Unclear: 10%/);
   assert.match(harness.sentMessages[0]?.content ?? "", /anthropic\/claude-sonnet-4-5 — usable/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
   assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the openai\/gpt-5 migration plan\./);
   assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro/);
+  assert.equal((harness.sentMessages[0]?.details as { synthesis?: { consensusAnswer?: string } })?.synthesis?.consensusAnswer, "Use the incremental migration plan.");
   assert.deepEqual(
     participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
     [
@@ -146,6 +196,17 @@ test("consensus command validates config, runs participants, prefers project con
     ],
   );
   assert.match(participantInvocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
+  assert.deepEqual(synthesisInvocations, [
+    {
+      model: "openai/gpt-5",
+      cwd: projectDir,
+      prompt:
+        'Original user prompt:\n"""\ndraft a migration plan\n"""\n\nUsable participant outputs:\n\nParticipant: anthropic/claude-sonnet-4-5\nRecommendation: adopt the anthropic/claude-sonnet-4-5 migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.\n\nParticipant: openai/gpt-5\nRecommendation: adopt the openai/gpt-5 migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.',
+      allowedTools: [],
+      systemPrompt: synthesisInvocations[0]?.systemPrompt ?? "",
+    },
+  ]);
+  assert.match(synthesisInvocations[0]?.systemPrompt ?? "", /Return valid JSON only/i);
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
@@ -161,7 +222,7 @@ test("consensus command validates config, runs participants, prefers project con
     },
     {
       level: "info",
-      message: "pi-consensus participant pass executed; usable outputs collected and synthesis is not implemented yet.",
+      message: "pi-consensus participant pass and synthesis completed.",
     },
   ]);
 });

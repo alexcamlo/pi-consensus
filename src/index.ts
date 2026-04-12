@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
 import { filterParticipantOutputs, runParticipantPass, type ParticipantInvocationExecutor } from "./participants.ts";
 import { createConsensusExecutionResult } from "./result.ts";
+import { runConsensusSynthesis, type SynthesisInvocationExecutor } from "./synthesis.ts";
 
 const TOOL_NAME = "consensus";
 const COMMAND_NAME = "consensus";
@@ -12,7 +13,10 @@ const MESSAGE_TYPE = "consensus-scaffold";
 
 export default function consensusExtension(
   pi: ExtensionAPI,
-  dependencies: { executeParticipantInvocation?: ParticipantInvocationExecutor } = {},
+  dependencies: {
+    executeParticipantInvocation?: ParticipantInvocationExecutor;
+    executeSynthesisInvocation?: SynthesisInvocationExecutor;
+  } = {},
 ) {
   pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup" || event.reason === "reload") {
@@ -47,11 +51,24 @@ export default function consensusExtension(
         dependencies.executeParticipantInvocation,
       );
       const filteredParticipants = filterParticipantOutputs(participantPass.participants);
+      const synthesis = filteredParticipants.failureMessage
+        ? undefined
+        : await runConsensusSynthesis(
+            {
+              prompt: params.prompt,
+              cwd: ctx.cwd ?? process.cwd(),
+              config,
+              usableParticipants: filteredParticipants.usable,
+              excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
+            },
+            dependencies.executeSynthesisInvocation,
+          );
       const result = createConsensusExecutionResult(
         params.prompt,
         toScaffoldSummary(config),
         filteredParticipants.participants.map(toParticipantSummary),
         filteredParticipants.failureMessage,
+        synthesis?.output,
       );
 
       return {
@@ -92,11 +109,24 @@ export default function consensusExtension(
         dependencies.executeParticipantInvocation,
       );
       const filteredParticipants = filterParticipantOutputs(participantPass.participants);
+      const synthesis = filteredParticipants.failureMessage
+        ? undefined
+        : await runConsensusSynthesis(
+            {
+              prompt,
+              cwd: ctx.cwd ?? process.cwd(),
+              config,
+              usableParticipants: filteredParticipants.usable,
+              excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
+            },
+            dependencies.executeSynthesisInvocation,
+          );
       const result = createConsensusExecutionResult(
         prompt,
         toScaffoldSummary(config),
         filteredParticipants.participants.map(toParticipantSummary),
         filteredParticipants.failureMessage,
+        synthesis?.output,
       );
 
       pi.sendMessage({
@@ -111,7 +141,7 @@ export default function consensusExtension(
         return;
       }
 
-      ctx.ui.notify("pi-consensus participant pass executed; usable outputs collected and synthesis is not implemented yet.", "info");
+      ctx.ui.notify("pi-consensus participant pass and synthesis completed.", "info");
     },
   });
 }

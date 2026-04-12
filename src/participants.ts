@@ -44,11 +44,15 @@ export type FilteredParticipantResult = {
   toolNamesUsed: string[];
 };
 
+export type UsableParticipantResult = FilteredParticipantResult & { status: "usable"; output: string };
+export type ExcludedParticipantResult = FilteredParticipantResult & { status: "excluded" };
+export type FailedParticipantResult = FilteredParticipantResult & { status: "failed" };
+
 export type ParticipantFilteringResult = {
   participants: FilteredParticipantResult[];
-  usable: FilteredParticipantResult[];
-  excluded: FilteredParticipantResult[];
-  failed: FilteredParticipantResult[];
+  usable: UsableParticipantResult[];
+  excluded: ExcludedParticipantResult[];
+  failed: FailedParticipantResult[];
   failureMessage?: string;
 };
 
@@ -93,9 +97,9 @@ export async function runParticipantPass(
 
 export function filterParticipantOutputs(participants: ParticipantExecutionResult[]): ParticipantFilteringResult {
   const filteredParticipants = participants.map(classifyParticipantOutput);
-  const usable = filteredParticipants.filter((participant) => participant.status === "usable");
-  const excluded = filteredParticipants.filter((participant) => participant.status === "excluded");
-  const failed = filteredParticipants.filter((participant) => participant.status === "failed");
+  const usable = filteredParticipants.filter(isUsableParticipant);
+  const excluded = filteredParticipants.filter(isExcludedParticipant);
+  const failed = filteredParticipants.filter(isFailedParticipant);
 
   return {
     participants: filteredParticipants,
@@ -242,6 +246,18 @@ export function buildParticipantCommand(invocation: ParticipantInvocation) {
     "--no-prompt-templates",
     invocation.prompt,
   ];
+}
+
+function isUsableParticipant(participant: FilteredParticipantResult): participant is UsableParticipantResult {
+  return participant.status === "usable";
+}
+
+function isExcludedParticipant(participant: FilteredParticipantResult): participant is ExcludedParticipantResult {
+  return participant.status === "excluded";
+}
+
+function isFailedParticipant(participant: FilteredParticipantResult): participant is FailedParticipantResult {
+  return participant.status === "failed";
 }
 
 function classifyParticipantOutput(participant: ParticipantExecutionResult): FilteredParticipantResult {
