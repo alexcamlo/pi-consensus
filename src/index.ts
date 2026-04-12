@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
+import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
 import { createConsensusScaffoldResult } from "./scaffold.ts";
 
 const TOOL_NAME = "consensus";
@@ -11,7 +12,7 @@ const MESSAGE_TYPE = "consensus-scaffold";
 export default function consensusExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup" || event.reason === "reload") {
-      ctx.ui.setStatus("pi-consensus", "pi-consensus loaded (scaffold)");
+      ctx.ui.setStatus("pi-consensus", "pi-consensus loaded (config validation scaffold)");
     }
   });
 
@@ -31,8 +32,9 @@ export default function consensusExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       prompt: Type.String({ description: "The user prompt to evaluate across multiple models." }),
     }),
-    async execute(_toolCallId, params) {
-      const result = createConsensusScaffoldResult(params.prompt);
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const config = validateConsensusContext(ctx);
+      const result = createConsensusScaffoldResult(params.prompt, toScaffoldSummary(config));
 
       return {
         content: [{ type: "text", text: result.text }],
@@ -51,7 +53,19 @@ export default function consensusExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const result = createConsensusScaffoldResult(prompt);
+      let config: ResolvedConsensusConfig;
+      try {
+        config = validateConsensusContext(ctx);
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        return;
+      }
+
+      for (const warning of config.warnings) {
+        ctx.ui.notify(warning, "warning");
+      }
+
+      const result = createConsensusScaffoldResult(prompt, toScaffoldSummary(config));
 
       pi.sendMessage({
         customType: MESSAGE_TYPE,
@@ -60,7 +74,30 @@ export default function consensusExtension(pi: ExtensionAPI) {
         display: true,
       });
 
-      ctx.ui.notify("pi-consensus scaffold executed; multi-model runner not implemented yet.", "info");
+      ctx.ui.notify("pi-consensus scaffold executed; config validated and multi-model runner not implemented yet.", "info");
     },
   });
+}
+
+function validateConsensusContext(ctx: {
+  cwd?: string;
+  agentDir?: string;
+  modelRegistry?: { getAvailable?: () => Array<{ provider: string; id: string }> };
+  model?: { provider: string; id: string };
+}) {
+  return loadConsensusConfig({
+    cwd: ctx.cwd ?? process.cwd(),
+    agentDir: ctx.agentDir,
+    availableModels: ctx.modelRegistry?.getAvailable?.() ?? [],
+    currentModel: ctx.model,
+  });
+}
+
+function toScaffoldSummary(config: ResolvedConsensusConfig) {
+  return {
+    configPath: config.configPath,
+    participants: config.models.map(formatModelRef),
+    synthesisModel: formatModelRef(config.synthesisModel),
+    warnings: config.warnings,
+  };
 }
