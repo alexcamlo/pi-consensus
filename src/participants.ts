@@ -16,6 +16,7 @@ export type ParticipantInvocation = {
   timeoutMs?: number;
   piCommand?: string;
   env?: NodeJS.ProcessEnv;
+  abortSignal?: AbortSignal;
 };
 
 export type ParticipantExecutionResult = {
@@ -33,6 +34,8 @@ export type ParticipantInvocationExecutor = (
 
 export type ParticipantPassResult = {
   participants: ParticipantExecutionResult[];
+  stoppedEarly: boolean;
+  earlyStopReason?: string;
 };
 
 export type FilteredParticipantResult = {
@@ -55,7 +58,13 @@ export type ParticipantFilteringResult = {
   excluded: ExcludedParticipantResult[];
   failed: FailedParticipantResult[];
   failureMessage?: string;
+  stoppedEarly: boolean;
+  earlyStopReason?: string;
 };
+
+export const MINIMUM_USABLE_PARTICIPANTS = 2;
+export const EARLY_STOP_FAILURE_REASON =
+  "participant subprocess cancelled because reaching the minimum 2 usable participants became impossible";
 
 export async function runParticipantPass(
   options: {
@@ -67,8 +76,40 @@ export async function runParticipantPass(
 ): Promise<ParticipantPassResult> {
   const { prompt, cwd, config } = options;
 
-  const participants = await Promise.all(
-    config.models.map(async (model) => {
+  const participants = new Array<ParticipantExecutionResult>(config.models.length);
+  const abortControllers = config.models.map(() => new AbortController());
+  const completionPromises: Promise<void>[] = [];
+  let settledCount = 0;
+  let usableCount = 0;
+  let stoppedEarly = false;
+  let earlyStopReason: string | undefined;
+  let resolved = false;
+
+  await new Promise<void>((resolve) => {
+    const maybeResolve = () => {
+      if (!resolved && settledCount === config.models.length) {
+        resolved = true;
+        resolve();
+      }
+    };
+
+    const maybeStopEarly = () => {
+      const remaining = config.models.length - settledCount;
+      if (stoppedEarly || usableCount + remaining >= MINIMUM_USABLE_PARTICIPANTS) {
+        return;
+      }
+
+      stoppedEarly = true;
+      earlyStopReason = `Consensus stopped early because only ${usableCount} usable participant output${usableCount === 1 ? "" : "s"} remained and ${remaining} participant run${remaining === 1 ? " was" : "s were"} still in flight, so reaching the minimum ${MINIMUM_USABLE_PARTICIPANTS} usable participants became impossible.`;
+
+      abortControllers.forEach((controller, index) => {
+        if (!participants[index]) {
+          controller.abort(earlyStopReason);
+        }
+      });
+    };
+
+    config.models.forEach((model, index) => {
       const invocation: ParticipantInvocation = {
         model,
         cwd,
@@ -77,26 +118,43 @@ export async function runParticipantPass(
         allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS],
         thinking: config.participantThinking,
         timeoutMs: config.participantTimeoutMs,
+        abortSignal: abortControllers[index].signal,
       };
 
-      try {
-        return await executeParticipantInvocation(invocation);
-      } catch (error) {
-        return {
-          model,
-          status: "failed",
-          failureReason: error instanceof Error ? error.message : String(error),
-          inspectedRepo: false,
-          toolNamesUsed: [],
-        } satisfies ParticipantExecutionResult;
-      }
-    }),
-  );
+      const completionPromise = (async () => {
+        try {
+          const result = await executeParticipantInvocation(invocation);
+          participants[index] = result;
+          if (classifyParticipantOutput(result).status === "usable") {
+            usableCount += 1;
+          }
+        } catch (error) {
+          participants[index] = {
+            model,
+            status: "failed",
+            failureReason: error instanceof Error ? error.message : String(error),
+            inspectedRepo: false,
+            toolNamesUsed: [],
+          } satisfies ParticipantExecutionResult;
+        } finally {
+          settledCount += 1;
+          maybeStopEarly();
+          maybeResolve();
+        }
+      })();
 
-  return { participants };
+      completionPromises.push(completionPromise);
+    });
+  });
+
+  await Promise.all(completionPromises);
+  return { participants, stoppedEarly, earlyStopReason };
 }
 
-export function filterParticipantOutputs(participants: ParticipantExecutionResult[]): ParticipantFilteringResult {
+export function filterParticipantOutputs(
+  participants: ParticipantExecutionResult[],
+  options: { stoppedEarly?: boolean; earlyStopReason?: string } = {},
+): ParticipantFilteringResult {
   const filteredParticipants = participants.map(classifyParticipantOutput);
   const usable = filteredParticipants.filter(isUsableParticipant);
   const excluded = filteredParticipants.filter(isExcludedParticipant);
@@ -107,10 +165,14 @@ export function filterParticipantOutputs(participants: ParticipantExecutionResul
     usable,
     excluded,
     failed,
+    stoppedEarly: options.stoppedEarly ?? false,
+    earlyStopReason: options.earlyStopReason,
     failureMessage:
-      usable.length >= 2
+      usable.length >= MINIMUM_USABLE_PARTICIPANTS
         ? undefined
-        : `Consensus requires at least 2 usable participant outputs but only ${usable.length} remained after filtering.`,
+        : options.stoppedEarly && options.earlyStopReason
+          ? `${options.earlyStopReason} Consensus requires at least ${MINIMUM_USABLE_PARTICIPANTS} usable participant outputs but only ${usable.length} remained after filtering.`
+          : `Consensus requires at least ${MINIMUM_USABLE_PARTICIPANTS} usable participant outputs but only ${usable.length} remained after filtering.`,
   };
 }
 
@@ -135,6 +197,17 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    let settled = false;
+    const finish = (result: ParticipantExecutionResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      invocation.abortSignal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+
     let lastAssistantText = "";
     let stderr = "";
     let timedOut = false;
@@ -146,6 +219,30 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
           child.kill("SIGKILL");
         }, invocation.timeoutMs)
       : undefined;
+
+    const onAbort = () => {
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) {
+          child.kill("SIGKILL");
+        }
+      }, 50).unref();
+    };
+
+    if (invocation.abortSignal) {
+      if (invocation.abortSignal.aborted) {
+        finish({
+          model: invocation.model,
+          status: "failed",
+          failureReason: typeof invocation.abortSignal.reason === "string" ? invocation.abortSignal.reason : EARLY_STOP_FAILURE_REASON,
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        });
+        return;
+      }
+
+      invocation.abortSignal.addEventListener("abort", onAbort, { once: true });
+    }
 
     const stdout = child.stdout;
     if (stdout) {
@@ -175,8 +272,7 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
     });
 
     child.on("error", (error) => {
-      if (timeout) clearTimeout(timeout);
-      resolve({
+      finish({
         model: invocation.model,
         status: "failed",
         failureReason: error.message,
@@ -186,11 +282,9 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
     });
 
     child.on("close", (code, signal) => {
-      if (timeout) clearTimeout(timeout);
-
       const toolNames = [...toolNamesUsed];
       if (timedOut) {
-        resolve({
+        finish({
           model: invocation.model,
           status: "failed",
           failureReason: `participant subprocess timed out after ${invocation.timeoutMs}ms`,
@@ -200,8 +294,20 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
         return;
       }
 
+      if (invocation.abortSignal?.aborted) {
+        finish({
+          model: invocation.model,
+          status: "failed",
+          failureReason:
+            typeof invocation.abortSignal.reason === "string" ? invocation.abortSignal.reason : EARLY_STOP_FAILURE_REASON,
+          inspectedRepo: toolNames.length > 0,
+          toolNamesUsed: toolNames,
+        });
+        return;
+      }
+
       if (code === 0 && lastAssistantText.trim().length > 0) {
-        resolve({
+        finish({
           model: invocation.model,
           status: "completed",
           output: lastAssistantText.trim(),
@@ -219,7 +325,7 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
         .filter(Boolean)
         .join(": ");
 
-      resolve({
+      finish({
         model: invocation.model,
         status: "failed",
         failureReason: failureReason || "participant subprocess failed",

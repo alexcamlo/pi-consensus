@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createParticipantSystemPrompt, filterParticipantOutputs, runParticipantPass } from "../src/participants.ts";
+import {
+  createParticipantSystemPrompt,
+  EARLY_STOP_FAILURE_REASON,
+  filterParticipantOutputs,
+  runParticipantPass,
+} from "../src/participants.ts";
 
 const config = {
   configPath: ".pi/consensus.json",
@@ -48,7 +53,8 @@ test("runParticipantPass executes participant invocations in parallel with subpr
       return {
         model: invocation.model,
         status: "completed",
-        output: `answer from ${invocation.model.provider}/${invocation.model.id}`,
+        output:
+          `Recommendation: use ${invocation.model.provider}/${invocation.model.id}. Why: it keeps the plan concrete and actionable. Risks/tradeoffs: moderate complexity. Confidence: 80%.`,
         inspectedRepo: true,
         toolNamesUsed: ["read", "find"],
       };
@@ -69,8 +75,8 @@ test("runParticipantPass executes participant invocations in parallel with subpr
   assert.match(invocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
   assert.doesNotMatch(invocations[0]?.systemPrompt ?? "", /multi_grep/);
   assert.deepEqual(result.participants.map((participant) => participant.status), ["completed", "completed"]);
+  assert.equal(result.stoppedEarly, false);
 });
-
 
 test("createParticipantSystemPrompt only advertises subprocess-safe participant tools", () => {
   const prompt = createParticipantSystemPrompt();
@@ -94,7 +100,8 @@ test("runParticipantPass captures failed participant executions for downstream h
       return {
         model: invocation.model,
         status: "completed",
-        output: "usable answer",
+        output:
+          "Recommendation: keep the migration incremental. Why: it lowers rollout risk. Risks/tradeoffs: some coordination overhead. Confidence: 80%.",
         inspectedRepo: false,
         toolNamesUsed: [],
       };
@@ -105,7 +112,8 @@ test("runParticipantPass captures failed participant executions for downstream h
     {
       model: { provider: "anthropic", id: "claude-sonnet-4-5" },
       status: "completed",
-      output: "usable answer",
+      output:
+        "Recommendation: keep the migration incremental. Why: it lowers rollout risk. Risks/tradeoffs: some coordination overhead. Confidence: 80%.",
       inspectedRepo: false,
       toolNamesUsed: [],
     },
@@ -117,6 +125,104 @@ test("runParticipantPass captures failed participant executions for downstream h
       toolNamesUsed: [],
     },
   ]);
+});
+
+test("runParticipantPass aborts in-flight participant runs once reaching two usable outputs becomes impossible", async () => {
+  const configWithThreeModels = {
+    ...config,
+    models: [
+      { provider: "anthropic", id: "claude-sonnet-4-5" },
+      { provider: "openai", id: "gpt-5" },
+      { provider: "google", id: "gemini-2.5-pro" },
+    ],
+  };
+  const abortedModels: string[] = [];
+  const completedModels: string[] = [];
+
+  const result = await runParticipantPass(
+    {
+      prompt: "draft a migration plan",
+      cwd: "/tmp/project",
+      config: configWithThreeModels,
+    },
+    async (invocation) => {
+      const model = `${invocation.model.provider}/${invocation.model.id}`;
+
+      if (invocation.model.provider === "google") {
+        await new Promise<void>((resolve) => {
+          invocation.abortSignal?.addEventListener(
+            "abort",
+            () => {
+              abortedModels.push(model);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+
+        return {
+          model: invocation.model,
+          status: "failed",
+          failureReason: String(invocation.abortSignal?.reason ?? EARLY_STOP_FAILURE_REASON),
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
+      }
+
+      completedModels.push(model);
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: invocation.model.provider === "anthropic" ? "Maybe refactor it." : "I'm sorry, but I can't help with that request.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  assert.deepEqual(completedModels, ["anthropic/claude-sonnet-4-5", "openai/gpt-5"]);
+  assert.deepEqual(abortedModels, ["google/gemini-2.5-pro"]);
+  assert.equal(result.stoppedEarly, true);
+  assert.match(result.earlyStopReason ?? "", /Consensus stopped early because only 0 usable participant outputs remained/);
+  assert.equal(result.participants[2]?.status, "failed");
+  assert.match(result.participants[2]?.failureReason ?? "", /reaching the minimum 2 usable participants became impossible/);
+});
+
+test("filterParticipantOutputs includes the early-stop explanation when remaining participants were cancelled", () => {
+  const filtered = filterParticipantOutputs(
+    [
+      {
+        model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+        status: "completed",
+        output: "Maybe refactor it.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+      {
+        model: { provider: "openai", id: "gpt-5" },
+        status: "completed",
+        output: "I'm sorry, but I can't help with that request.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+      {
+        model: { provider: "google", id: "gemini-2.5-pro" },
+        status: "failed",
+        failureReason: EARLY_STOP_FAILURE_REASON,
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+    ],
+    {
+      stoppedEarly: true,
+      earlyStopReason:
+        "Consensus stopped early because only 0 usable participant outputs remained and 1 participant run was still in flight, so reaching the minimum 2 usable participants became impossible.",
+    },
+  );
+
+  assert.equal(filtered.stoppedEarly, true);
+  assert.match(filtered.failureMessage ?? "", /Consensus stopped early because only 0 usable participant outputs remained/);
+  assert.match(filtered.failureMessage ?? "", /only 0 remained after filtering/);
 });
 
 test("filterParticipantOutputs excludes refusal-only and vague answers and fails when fewer than two usable remain", () => {

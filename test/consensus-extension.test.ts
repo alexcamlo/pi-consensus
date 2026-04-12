@@ -324,7 +324,7 @@ test("consensus tool shows a clear error when config is missing", async () => {
   assert.equal(commandContext.widgetCleared, true);
 });
 
-test("consensus tool returns a clear result when fewer than two usable participant outputs remain after filtering", async () => {
+test("consensus tool stops early, skips synthesis, and explains why when the minimum usable participant count becomes impossible", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-filtered-"));
   mkdirSync(join(projectDir, ".pi"), { recursive: true });
   writeFileSync(
@@ -335,20 +335,24 @@ test("consensus tool returns a clear result when fewer than two usable participa
   );
 
   const harness = createExtensionHarness();
+  const participantOutcomes: string[] = [];
+  let synthesisCalled = false;
   consensusExtension(harness.pi as never, {
     executeParticipantInvocation: async (invocation) => {
+      const model = `${invocation.model.provider}/${invocation.model.id}`;
       if (invocation.model.provider === "anthropic") {
+        participantOutcomes.push(`${model}:completed`);
         return {
           model: invocation.model,
           status: "completed",
-          output:
-            "Recommendation: update src/index.ts. Why: it centralizes dispatch. Risks/tradeoffs: medium migration cost. Confidence: 82%.",
-          inspectedRepo: true,
-          toolNamesUsed: ["read"],
+          output: "Maybe refactor it.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
         };
       }
 
       if (invocation.model.provider === "openai") {
+        participantOutcomes.push(`${model}:completed`);
         return {
           model: invocation.model,
           status: "completed",
@@ -358,13 +362,24 @@ test("consensus tool returns a clear result when fewer than two usable participa
         };
       }
 
+      await new Promise<void>((resolve) => {
+        invocation.abortSignal?.addEventListener("abort", () => {
+          participantOutcomes.push(`${model}:aborted`);
+          resolve();
+        }, { once: true });
+      });
+
       return {
         model: invocation.model,
         status: "failed",
-        failureReason: "participant subprocess exited with code 1",
+        failureReason: String(invocation.abortSignal?.reason ?? "aborted"),
         inspectedRepo: false,
         toolNamesUsed: [],
       };
+    },
+    executeSynthesisInvocation: async () => {
+      synthesisCalled = true;
+      throw new Error("synthesis should have been skipped");
     },
   });
 
@@ -385,13 +400,19 @@ test("consensus tool returns a clear result when fewer than two usable participa
   );
 
   const content = toolResult?.content[0]?.text ?? "";
-  assert.match(
-    content,
-    /Consensus requires at least 2 usable participant outputs but only 1 remained after filtering\./,
-  );
+  assert.equal(synthesisCalled, false);
+  assert.deepEqual(participantOutcomes, [
+    "anthropic/claude-sonnet-4-5:completed",
+    "openai/gpt-5:completed",
+    "google/gemini-2.5-pro:aborted",
+  ]);
+  assert.match(content, /Consensus stopped early because only 0 usable participant outputs remained and 1 participant run was still in flight/);
+  assert.match(content, /Consensus requires at least 2 usable participant outputs but only 0 remained after filtering\./);
   assert.match(content, /openai\/gpt-5 — excluded/);
   assert.match(content, /Reason: refusal-only response/);
   assert.match(content, /google\/gemini-2\.5-pro — failed/);
+  assert.match(content, /reaching the minimum 2 usable participants became impossible/);
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — skipped/.test(line))));
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",

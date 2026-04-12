@@ -115,7 +115,10 @@ async function executeConsensusWorkflow(
       },
       createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
     );
-    const filteredParticipants = filterParticipantOutputs(participantPass.participants);
+    const filteredParticipants = filterParticipantOutputs(participantPass.participants, {
+      stoppedEarly: participantPass.stoppedEarly,
+      earlyStopReason: participantPass.earlyStopReason,
+    });
 
     if (filteredParticipants.failureMessage) {
       progress.synthesis = "skipped";
