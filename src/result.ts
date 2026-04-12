@@ -118,8 +118,8 @@ export function createConsensusExecutionResult(
       nextSteps: failureMessage
         ? ["Retry with a prompt that yields at least 2 usable participant outputs.", "Add synthesis once usable outputs are available."]
         : synthesis
-          ? ["Render the structured consensus result for users.", "Persist results via the pi-native tool-result path."]
-          : ["Synthesize a consensus from usable participant outputs.", "Persist results via the pi-native tool-result path."],
+          ? ["Inspect debug participant outputs when you need to audit the consensus.", "Re-run /consensus with a refined prompt if you want a narrower comparison."]
+          : ["Synthesize a consensus from usable participant outputs.", "Inspect debug participant outputs before re-running if needed."],
     },
   };
 }

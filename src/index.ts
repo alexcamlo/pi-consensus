@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
@@ -14,7 +13,7 @@ import { runConsensusSynthesis, runSynthesisInvocation, type SynthesisInvocation
 
 const TOOL_NAME = "consensus";
 const COMMAND_NAME = "consensus";
-const MESSAGE_TYPE = "consensus-scaffold";
+const COMMAND_MESSAGE_TYPE = "consensus-command";
 
 export default function consensusExtension(
   pi: ExtensionAPI,
@@ -25,13 +24,9 @@ export default function consensusExtension(
 ) {
   pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup" || event.reason === "reload") {
-      ctx.ui.setStatus("pi-consensus", "pi-consensus loaded (config validation scaffold)");
+      ctx.ui.setStatus("pi-consensus", "pi-consensus loaded");
     }
   });
-
-  pi.registerMessageRenderer(MESSAGE_TYPE, (message) =>
-    new Text(typeof message.content === "string" ? message.content : "", 0, 0),
-  );
 
   pi.registerTool({
     name: TOOL_NAME,
@@ -40,46 +35,13 @@ export default function consensusExtension(
     promptSnippet: "Run a multi-model consensus workflow when the user explicitly asks for consensus.",
     promptGuidelines: [
       "Use this tool only for explicit consensus requests; do not replace normal pi behavior.",
-      "Treat this repo as read-only until the consensus runner is implemented.",
+      "Treat this repo as read-only.",
     ],
     parameters: Type.Object({
       prompt: Type.String({ description: "The user prompt to evaluate across multiple models." }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const config = validateConsensusContext(ctx);
-      const participantPass = await runParticipantPass(
-        {
-          prompt: params.prompt,
-          cwd: ctx.cwd ?? process.cwd(),
-          config,
-        },
-        dependencies.executeParticipantInvocation,
-      );
-      const filteredParticipants = filterParticipantOutputs(participantPass.participants);
-      const synthesis = filteredParticipants.failureMessage
-        ? undefined
-        : await runConsensusSynthesis(
-            {
-              prompt: params.prompt,
-              cwd: ctx.cwd ?? process.cwd(),
-              config,
-              usableParticipants: filteredParticipants.usable,
-              excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
-            },
-            dependencies.executeSynthesisInvocation,
-          );
-      const result = createConsensusExecutionResult(
-        params.prompt,
-        toScaffoldSummary(config),
-        filteredParticipants.participants.map(toParticipantSummary),
-        filteredParticipants.failureMessage,
-        synthesis?.output,
-      );
-
-      return {
-        content: [{ type: "text", text: result.text }],
-        details: result.details,
-      };
+      return executeConsensusWorkflow(params.prompt, ctx, dependencies);
     },
   });
 
@@ -93,77 +55,115 @@ export default function consensusExtension(
         return;
       }
 
-      const progress = createConsensusProgressState();
+      const options = ctx.isIdle?.() === false ? { deliverAs: "followUp" as const, triggerTurn: true } : { triggerTurn: true };
+      pi.sendMessage(
+        {
+          customType: COMMAND_MESSAGE_TYPE,
+          content: createConsensusRelayInstruction(prompt),
+          details: { prompt },
+          display: false,
+        },
+        options,
+      );
 
-      try {
-        updateConsensusProgress(ctx, progress, "Validating consensus config...");
+      if (ctx.isIdle?.() === false) {
+        ctx.ui.notify("Queued /consensus as a follow-up tool run.", "info");
+      }
+    },
+  });
+}
 
-        const config: ResolvedConsensusConfig = validateConsensusContext(ctx);
+async function executeConsensusWorkflow(
+  prompt: string,
+  ctx: {
+    cwd?: string;
+    agentDir?: string;
+    hasUI?: boolean;
+    modelRegistry?: { getAvailable?: () => Array<{ provider: string; id: string }> };
+    model?: { provider: string; id: string };
+    ui: {
+      notify: (message: string, level?: "error" | "info" | "warning") => void;
+      setStatus?: (key: string, status?: string) => void;
+      setWidget?: (key: string, widget?: string[]) => void;
+    };
+  },
+  dependencies: {
+    executeParticipantInvocation?: ParticipantInvocationExecutor;
+    executeSynthesisInvocation?: SynthesisInvocationExecutor;
+  },
+) {
+  const progress = createConsensusProgressState();
 
-        for (const warning of config.warnings) {
-          ctx.ui.notify(warning, "warning");
-        }
+  try {
+    updateConsensusProgress(ctx, progress, "Validating consensus config...");
 
-        for (const model of config.models) {
-          progress.participants.set(formatModelRef(model), "pending");
-        }
-        updateConsensusProgress(ctx, progress, "Running participant pass...");
+    const config = validateConsensusContext(ctx);
+    for (const warning of config.warnings) {
+      ctx.ui.notify(warning, "warning");
+    }
 
-        const participantPass = await runParticipantPass(
+    for (const model of config.models) {
+      progress.participants.set(formatModelRef(model), "pending");
+    }
+    updateConsensusProgress(ctx, progress, "Running participant pass...");
+
+    const participantPass = await runParticipantPass(
+      {
+        prompt,
+        cwd: ctx.cwd ?? process.cwd(),
+        config,
+      },
+      createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
+    );
+    const filteredParticipants = filterParticipantOutputs(participantPass.participants);
+
+    if (filteredParticipants.failureMessage) {
+      progress.synthesis = "skipped";
+      updateConsensusProgress(ctx, progress, "Skipping synthesis...");
+    }
+
+    const synthesis = filteredParticipants.failureMessage
+      ? undefined
+      : await runConsensusSynthesis(
           {
             prompt,
             cwd: ctx.cwd ?? process.cwd(),
             config,
+            usableParticipants: filteredParticipants.usable,
+            excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
           },
-          createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
-        );
-        const filteredParticipants = filterParticipantOutputs(participantPass.participants);
-
-        if (filteredParticipants.failureMessage) {
-          progress.synthesis = "skipped";
-          updateConsensusProgress(ctx, progress, "Skipping synthesis...");
-        }
-
-        const synthesis = filteredParticipants.failureMessage
-          ? undefined
-          : await runConsensusSynthesis(
-              {
-                prompt,
-                cwd: ctx.cwd ?? process.cwd(),
-                config,
-                usableParticipants: filteredParticipants.usable,
-                excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
-              },
-              createProgressSynthesisExecutor(progress, ctx, dependencies.executeSynthesisInvocation),
-            );
-        const result = createConsensusExecutionResult(
-          prompt,
-          toScaffoldSummary(config),
-          filteredParticipants.participants.map(toParticipantSummary),
-          filteredParticipants.failureMessage,
-          synthesis?.output,
+          createProgressSynthesisExecutor(progress, ctx, dependencies.executeSynthesisInvocation),
         );
 
-        pi.sendMessage({
-          customType: MESSAGE_TYPE,
-          content: result.text,
-          details: result.details,
-          display: true,
-        });
+    const result = createConsensusExecutionResult(
+      prompt,
+      toConsensusSummary(config),
+      filteredParticipants.participants.map(toParticipantSummary),
+      filteredParticipants.failureMessage,
+      synthesis?.output,
+    );
 
-        if (filteredParticipants.failureMessage) {
-          ctx.ui.notify(filteredParticipants.failureMessage, "error");
-          return;
-        }
+    if (!filteredParticipants.failureMessage) {
+      ctx.ui.notify("pi-consensus participant pass and synthesis completed.", "info");
+    }
 
-        ctx.ui.notify("pi-consensus participant pass and synthesis completed.", "info");
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-      } finally {
-        clearConsensusProgress(ctx);
-      }
-    },
-  });
+    return {
+      content: [{ type: "text" as const, text: result.text }],
+      details: result.details,
+    };
+  } finally {
+    clearConsensusProgress(ctx);
+  }
+}
+
+function createConsensusRelayInstruction(prompt: string) {
+  return [
+    "Call the consensus tool immediately.",
+    "Do not answer from your own knowledge.",
+    "Do not add assistant prose before or after the tool result.",
+    "Use this exact tool argument JSON:",
+    JSON.stringify({ prompt }),
+  ].join("\n\n");
 }
 
 function validateConsensusContext(ctx: {
@@ -251,7 +251,7 @@ function clearConsensusProgress(ctx: { hasUI?: boolean; ui: { setStatus?: (key: 
   ctx.ui.setWidget?.("pi-consensus", undefined);
 }
 
-function toScaffoldSummary(config: ResolvedConsensusConfig) {
+function toConsensusSummary(config: ResolvedConsensusConfig) {
   return {
     configPath: config.configPath,
     participants: config.models.map(formatModelRef),

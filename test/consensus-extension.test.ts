@@ -59,7 +59,54 @@ test("createConsensusExecutionResult returns formatted consensus text with debug
   assert.ok(result.details.nextSteps.length >= 2);
 });
 
-test("consensus command validates config, runs synthesis with full participant outputs, prefers project config, and reports warnings", async () => {
+test("consensus command relays through a hidden assistant tool-call message when idle", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0], {
+    message: {
+      customType: "consensus-command",
+      content: [
+        "Call the consensus tool immediately.",
+        "Do not answer from your own knowledge.",
+        "Do not add assistant prose before or after the tool result.",
+        "Use this exact tool argument JSON:",
+        JSON.stringify({ prompt: "draft a migration plan" }),
+      ].join("\n\n"),
+      details: { prompt: "draft a migration plan" },
+      display: false,
+    },
+    options: { triggerTurn: true },
+  });
+  assert.equal(harness.sentUserMessages.length, 0);
+  assert.equal(harness.sentToolLikeMessages.length, 0);
+  assert.deepEqual(commandContext.notifications, []);
+});
+
+test("consensus command queues a follow-up assistant tool-call message when pi is busy", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  commandContext.idle = false;
+
+  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "info",
+      message: "Queued /consensus as a follow-up tool run.",
+    },
+  ]);
+});
+
+test("consensus tool validates config, runs synthesis with full participant outputs, prefers project config, and reports warnings", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-project-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-"));
 
@@ -165,22 +212,28 @@ test("consensus command validates config, runs synthesis with full participant o
   commandContext.model = { provider: "openai", id: "gpt-5" };
   commandContext.agentDir = agentDir;
 
-  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+  const toolResult = await harness.registeredTool?.execute(
+    "tool-call-1",
+    { prompt: "draft a migration plan" },
+    undefined,
+    undefined,
+    commandContext,
+  );
 
-  assert.equal(harness.sentMessages.length, 1);
-  assert.match(harness.sentMessages[0]?.content ?? "", /^# Consensus/m);
-  assert.match(harness.sentMessages[0]?.content ?? "", /## Metadata[\s\S]*Config: .*\.pi\/consensus\.json/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Synthesis model: openai\/gpt-5/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /## Answer\s+Use the incremental migration plan\./m);
-  assert.match(harness.sentMessages[0]?.content ?? "", /- Agreement: 70%/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /- Disagreement: 20%/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /- Unclear: 10%/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /## Participants\s+- anthropic\/claude-sonnet-4-5 — Recommended an incremental rollout\.\s+- openai\/gpt-5 — Also recommended an incremental rollout\./m);
-  assert.match(harness.sentMessages[0]?.content ?? "", /## Debug participant outputs/m);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the openai\/gpt-5 migration plan\./);
-  assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro —/);
-  assert.equal((harness.sentMessages[0]?.details as { synthesis?: { consensusAnswer?: string } })?.synthesis?.consensusAnswer, "Use the incremental migration plan.");
+  const content = toolResult?.content[0]?.text ?? "";
+  assert.match(content, /^# Consensus/m);
+  assert.match(content, /## Metadata[\s\S]*Config: .*\.pi\/consensus\.json/);
+  assert.match(content, /Synthesis model: openai\/gpt-5/);
+  assert.match(content, /## Answer\s+Use the incremental migration plan\./m);
+  assert.match(content, /- Agreement: 70%/);
+  assert.match(content, /- Disagreement: 20%/);
+  assert.match(content, /- Unclear: 10%/);
+  assert.match(content, /## Participants\s+- anthropic\/claude-sonnet-4-5 — Recommended an incremental rollout\.\s+- openai\/gpt-5 — Also recommended an incremental rollout\./m);
+  assert.match(content, /## Debug participant outputs/m);
+  assert.match(content, /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
+  assert.match(content, /Recommendation: adopt the openai\/gpt-5 migration plan\./);
+  assert.doesNotMatch(content, /google\/gemini-2\.5-pro —/);
+  assert.equal((toolResult?.details as { synthesis?: { consensusAnswer?: string } })?.synthesis?.consensusAnswer, "Use the incremental migration plan.");
   assert.deepEqual(
     participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
     [
@@ -242,7 +295,7 @@ test("consensus command validates config, runs synthesis with full participant o
   assert.equal(commandContext.widgetCleared, true);
 });
 
-test("consensus command shows a clear error when config is missing", async () => {
+test("consensus tool shows a clear error when config is missing", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-missing-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-missing-"));
 
@@ -256,19 +309,20 @@ test("consensus command shows a clear error when config is missing", async () =>
   commandContext.model = { provider: "openai", id: "gpt-5" };
   commandContext.agentDir = agentDir;
 
-  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
-
-  assert.equal(harness.sentMessages.length, 0);
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "error",
-      message:
-        "Consensus config not found. Create .pi/consensus.json or ~/.pi/agent/consensus.json with at least 2 participant models.",
-    },
-  ]);
+  await assert.rejects(
+    harness.registeredTool?.execute(
+      "tool-call-missing-config",
+      { prompt: "draft a migration plan" },
+      undefined,
+      undefined,
+      commandContext,
+    ),
+    /Consensus config not found\. Create \.pi\/consensus\.json or ~\/\.pi\/agent\/consensus\.json with at least 2 participant models\./,
+  );
+  assert.equal(commandContext.widgetCleared, true);
 });
 
-test("consensus command fails clearly when fewer than two usable participant outputs remain after filtering", async () => {
+test("consensus tool returns a clear result when fewer than two usable participant outputs remain after filtering", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-filtered-"));
   mkdirSync(join(projectDir, ".pi"), { recursive: true });
   writeFileSync(
@@ -320,24 +374,26 @@ test("consensus command fails clearly when fewer than two usable participant out
   commandContext.model = { provider: "openai", id: "gpt-5" };
   commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-filtered-"));
 
-  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+  const toolResult = await harness.registeredTool?.execute(
+    "tool-call-filtered",
+    { prompt: "draft a migration plan" },
+    undefined,
+    undefined,
+    commandContext,
+  );
 
-  assert.equal(harness.sentMessages.length, 1);
+  const content = toolResult?.content[0]?.text ?? "";
   assert.match(
-    harness.sentMessages[0]?.content ?? "",
+    content,
     /Consensus requires at least 2 usable participant outputs but only 1 remained after filtering\./,
   );
-  assert.match(harness.sentMessages[0]?.content ?? "", /openai\/gpt-5 — excluded/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Reason: refusal-only response/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro — failed/);
+  assert.match(content, /openai\/gpt-5 — excluded/);
+  assert.match(content, /Reason: refusal-only response/);
+  assert.match(content, /google\/gemini-2\.5-pro — failed/);
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
       message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-    {
-      level: "error",
-      message: "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
     },
   ]);
 });
@@ -357,12 +413,12 @@ test("consensus tool fails clearly when fewer than two unique participant models
 
   await assert.rejects(
     harness.registeredTool?.execute(
-      "tool-call-1",
+      "tool-call-2",
       { prompt: "draft a migration plan" },
       undefined,
       undefined,
       {
-        cwd: projectDir,
+        ...createCommandContext(projectDir),
         agentDir: mkdtempSync(join(tmpdir(), "pi-consensus-agent-invalid-")),
         model: { provider: "openai", id: "gpt-5" },
         modelRegistry: {
@@ -374,7 +430,7 @@ test("consensus tool fails clearly when fewer than two unique participant models
   );
 });
 
-test("consensus command clears progress and reports synthesis failures cleanly", async () => {
+test("consensus tool clears progress and reports synthesis failures cleanly", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-error-"));
   mkdirSync(join(projectDir, ".pi"), { recursive: true });
   writeFileSync(
@@ -405,17 +461,21 @@ test("consensus command clears progress and reports synthesis failures cleanly",
   commandContext.model = { provider: "openai", id: "gpt-5" };
   commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-error-"));
 
-  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+  await assert.rejects(
+    harness.registeredTool?.execute(
+      "tool-call-synthesis-error",
+      { prompt: "draft a migration plan" },
+      undefined,
+      undefined,
+      commandContext,
+    ),
+    /synthesis subprocess exited with code 1/,
+  );
 
-  assert.equal(harness.sentMessages.length, 0);
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
       message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-    {
-      level: "error",
-      message: "synthesis subprocess exited with code 1",
     },
   ]);
   assert.equal(commandContext.widgetCleared, true);
@@ -446,12 +506,12 @@ test("consensus tool fails clearly when participant count exceeds the safety cap
 
   await assert.rejects(
     harness.registeredTool?.execute(
-      "tool-call-2",
+      "tool-call-too-many",
       { prompt: "draft a migration plan" },
       undefined,
       undefined,
       {
-        cwd: projectDir,
+        ...createCommandContext(projectDir),
         agentDir: mkdtempSync(join(tmpdir(), "pi-consensus-agent-too-many-")),
         model: { provider: "openai", id: "gpt-5" },
         modelRegistry: {
@@ -503,14 +563,15 @@ function createExtensionHarness() {
         ) => Promise<{ content: Array<{ type: string; text: string }>; details: { status: string; prompt: string; readOnly: boolean } }>;
       }
     | undefined;
-  let registeredMessageType: string | undefined;
-  const sentMessages: Array<{ customType: string; content: string; details: unknown; display: boolean }> = [];
+  const sentMessages: Array<{
+    message: { customType: string; content: string; details?: unknown; display: boolean };
+    options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean };
+  }> = [];
+  const sentUserMessages: unknown[] = [];
+  const sentToolLikeMessages: unknown[] = [];
 
   const pi = {
     on: () => {},
-    registerMessageRenderer: (messageType: string) => {
-      registeredMessageType = messageType;
-    },
     registerTool: (tool: NonNullable<typeof registeredTool>) => {
       registeredTool = tool;
     },
@@ -518,21 +579,31 @@ function createExtensionHarness() {
       assert.equal(name, "consensus");
       registeredCommand = command;
     },
-    sendMessage: (message: { customType: string; content: string; details: unknown; display: boolean }) => {
-      sentMessages.push(message);
+    sendMessage: (
+      message: { customType: string; content: string; details?: unknown; display: boolean },
+      options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
+    ) => {
+      sentMessages.push({ message, options });
+    },
+    sendUserMessage: (message: unknown, options?: unknown) => {
+      sentUserMessages.push({ message, options });
+    },
+    sendToolLikeMessage: (message: unknown, options?: unknown) => {
+      sentToolLikeMessages.push({ message, options });
     },
   };
 
   return {
     pi,
     get registeredCommand() {
-      assert.equal(registeredMessageType, "consensus-scaffold");
       return registeredCommand;
     },
     get registeredTool() {
       return registeredTool;
     },
     sentMessages,
+    sentUserMessages,
+    sentToolLikeMessages,
   };
 }
 
@@ -544,6 +615,7 @@ function createCommandContext(
   const statusUpdates: string[] = [];
   const widgetUpdates: string[][] = [];
   let widgetCleared = false;
+  let idle = true;
 
   return {
     notifications,
@@ -552,7 +624,15 @@ function createCommandContext(
     get widgetCleared() {
       return widgetCleared;
     },
+    get idle() {
+      return idle;
+    },
+    set idle(value: boolean) {
+      idle = value;
+    },
+    isIdle: () => idle,
     cwd,
+    hasUI: true,
     agentDir: undefined as string | undefined,
     model: undefined as { provider: string; id: string } | undefined,
     modelRegistry: {
