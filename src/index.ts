@@ -3,7 +3,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
-import { runParticipantPass, type ParticipantInvocationExecutor } from "./participants.ts";
+import { filterParticipantOutputs, runParticipantPass, type ParticipantInvocationExecutor } from "./participants.ts";
 import { createConsensusExecutionResult } from "./result.ts";
 
 const TOOL_NAME = "consensus";
@@ -46,10 +46,12 @@ export default function consensusExtension(
         },
         dependencies.executeParticipantInvocation,
       );
+      const filteredParticipants = filterParticipantOutputs(participantPass.participants);
       const result = createConsensusExecutionResult(
         params.prompt,
         toScaffoldSummary(config),
-        participantPass.participants.map(toParticipantSummary),
+        filteredParticipants.participants.map(toParticipantSummary),
+        filteredParticipants.failureMessage,
       );
 
       return {
@@ -89,10 +91,12 @@ export default function consensusExtension(
         },
         dependencies.executeParticipantInvocation,
       );
+      const filteredParticipants = filterParticipantOutputs(participantPass.participants);
       const result = createConsensusExecutionResult(
         prompt,
         toScaffoldSummary(config),
-        participantPass.participants.map(toParticipantSummary),
+        filteredParticipants.participants.map(toParticipantSummary),
+        filteredParticipants.failureMessage,
       );
 
       pi.sendMessage({
@@ -102,7 +106,12 @@ export default function consensusExtension(
         display: true,
       });
 
-      ctx.ui.notify("pi-consensus participant pass executed; outputs collected and synthesis is not implemented yet.", "info");
+      if (filteredParticipants.failureMessage) {
+        ctx.ui.notify(filteredParticipants.failureMessage, "error");
+        return;
+      }
+
+      ctx.ui.notify("pi-consensus participant pass executed; usable outputs collected and synthesis is not implemented yet.", "info");
     },
   });
 }
@@ -132,9 +141,10 @@ function toScaffoldSummary(config: ResolvedConsensusConfig) {
 
 function toParticipantSummary(participant: {
   model: { provider: string; id: string };
-  status: "completed" | "failed";
+  status: "usable" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
+  exclusionReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
 }) {
@@ -143,6 +153,7 @@ function toParticipantSummary(participant: {
     status: participant.status,
     output: participant.output,
     failureReason: participant.failureReason,
+    exclusionReason: participant.exclusionReason,
     inspectedRepo: participant.inspectedRepo,
     toolNamesUsed: participant.toolNamesUsed,
   };

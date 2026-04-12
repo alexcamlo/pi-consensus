@@ -7,9 +7,10 @@ type ConsensusExecutionSummary = {
 
 type ParticipantExecutionSummary = {
   model: string;
-  status: "completed" | "failed";
+  status: "usable" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
+  exclusionReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
 };
@@ -17,11 +18,15 @@ type ParticipantExecutionSummary = {
 export type ConsensusExecutionResult = {
   text: string;
   details: {
-    status: "participant-pass-complete";
+    status: "participant-pass-complete" | "participant-pass-insufficient-usable";
     prompt: string;
     readOnly: true;
     config: ConsensusExecutionSummary;
     participants: ParticipantExecutionSummary[];
+    usableParticipantCount: number;
+    excludedParticipantCount: number;
+    failedParticipantCount: number;
+    failureMessage?: string;
     nextSteps: string[];
   };
 };
@@ -30,34 +35,47 @@ export function createConsensusExecutionResult(
   prompt: string,
   config: ConsensusExecutionSummary,
   participants: ParticipantExecutionSummary[],
+  failureMessage?: string,
 ): ConsensusExecutionResult {
+  const usableParticipantCount = participants.filter((participant) => participant.status === "usable").length;
+  const excludedParticipantCount = participants.filter((participant) => participant.status === "excluded").length;
+  const failedParticipantCount = participants.filter((participant) => participant.status === "failed").length;
   const text = [
-    "pi-consensus participant pass completed.",
+    "pi-consensus participant filtering completed.",
     `Prompt: ${prompt}`,
     `Config: ${config.configPath}`,
     `Participants: ${config.participants.join(", ")}`,
     `Synthesis model: ${config.synthesisModel}`,
     `Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
+    `Usable participants: ${usableParticipantCount}`,
+    `Excluded participants: ${excludedParticipantCount}`,
+    `Failed participants: ${failedParticipantCount}`,
     "Participant results:",
     ...participants.flatMap((participant) => renderParticipantSummary(participant)),
-    "Status: first-pass participant outputs collected; synthesis not implemented yet.",
+    failureMessage
+      ? `Status: ${failureMessage}`
+      : "Status: usable participant outputs collected; synthesis not implemented yet.",
     "Read-only posture: no edit/write behavior is exposed.",
-    "Next steps: apply usability filtering, synthesize a consensus, and persist the final tool result.",
+    failureMessage
+      ? "Next steps: improve or retry excluded/failed participants before synthesis."
+      : "Next steps: synthesize a consensus and persist the final tool result.",
   ].join("\n");
 
   return {
     text,
     details: {
-      status: "participant-pass-complete",
+      status: failureMessage ? "participant-pass-insufficient-usable" : "participant-pass-complete",
       prompt,
       readOnly: true,
       config,
       participants,
-      nextSteps: [
-        "Filter unusable participant outputs.",
-        "Add synthesis and final result rendering.",
-        "Persist results via the pi-native tool-result path.",
-      ],
+      usableParticipantCount,
+      excludedParticipantCount,
+      failedParticipantCount,
+      failureMessage,
+      nextSteps: failureMessage
+        ? ["Retry with a prompt that yields at least 2 usable participant outputs.", "Add synthesis once usable outputs are available."]
+        : ["Synthesize a consensus from usable participant outputs.", "Persist results via the pi-native tool-result path."],
     },
   };
 }
@@ -76,6 +94,7 @@ function renderParticipantSummary(participant: ParticipantExecutionSummary) {
 
   return [
     headline,
+    ...(participant.status === "excluded" ? [`  Reason: ${participant.exclusionReason ?? "excluded from consensus"}`] : []),
     `  Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
     `  Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
     `  Output: ${participant.output ?? ""}`,

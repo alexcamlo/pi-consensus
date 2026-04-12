@@ -7,44 +7,56 @@ import test from "node:test";
 import consensusExtension from "../src/index.ts";
 import { createConsensusExecutionResult } from "../src/result.ts";
 
-test("createConsensusExecutionResult returns read-only participant-pass details", () => {
+test("createConsensusExecutionResult returns read-only filtering details", () => {
   const result = createConsensusExecutionResult(
     "review this repo",
     {
       configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
       synthesisModel: "openai/gpt-5",
       warnings: ["Duplicate participant models were deduplicated."],
     },
     [
       {
         model: "anthropic/claude-sonnet-4-5",
-        status: "completed",
+        status: "usable",
         output: "Inspect src/index.ts first.",
         inspectedRepo: true,
         toolNamesUsed: ["read"],
       },
       {
         model: "openai/gpt-5",
+        status: "excluded",
+        output: "I'm sorry, but I can't help with that request.",
+        exclusionReason: "refusal-only response",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+      {
+        model: "google/gemini-2.5-pro",
         status: "failed",
         failureReason: "participant subprocess exited with code 1",
         inspectedRepo: false,
         toolNamesUsed: [],
       },
     ],
+    "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
   );
 
-  assert.match(result.text, /pi-consensus participant pass completed\./);
+  assert.match(result.text, /pi-consensus participant filtering completed\./);
   assert.match(result.text, /Prompt: review this repo/);
   assert.match(result.text, /Config: \.pi\/consensus.json/);
   assert.match(result.text, /Participant results:/);
-  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — completed/);
-  assert.equal(result.details.status, "participant-pass-complete");
+  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — usable/);
+  assert.match(result.text, /openai\/gpt-5 — excluded/);
+  assert.match(result.text, /Reason: refusal-only response/);
+  assert.equal(result.details.status, "participant-pass-insufficient-usable");
   assert.equal(result.details.prompt, "review this repo");
   assert.equal(result.details.readOnly, true);
-  assert.equal(result.details.config?.participants.length, 2);
-  assert.equal(result.details.participants.length, 2);
-  assert.ok(result.details.nextSteps.length >= 3);
+  assert.equal(result.details.config?.participants.length, 3);
+  assert.equal(result.details.participants.length, 3);
+  assert.equal(result.details.usableParticipantCount, 1);
+  assert.ok(result.details.nextSteps.length >= 2);
 });
 
 test("consensus command validates config, runs participants, prefers project config, and reports warnings", async () => {
@@ -90,7 +102,8 @@ test("consensus command validates config, runs participants, prefers project con
       return {
         model: invocation.model,
         status: "completed",
-        output: `participant output from ${invocation.model.provider}/${invocation.model.id}`,
+        output:
+          `Recommendation: adopt the ${invocation.model.provider}/${invocation.model.id} migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.`,
         inspectedRepo: true,
         toolNamesUsed: ["read"],
       };
@@ -111,8 +124,9 @@ test("consensus command validates config, runs participants, prefers project con
   assert.match(harness.sentMessages[0]?.content ?? "", /Config: .*\.pi\/consensus\.json/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Synthesis model: openai\/gpt-5/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Participant results:/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /participant output from anthropic\/claude-sonnet-4-5/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /participant output from openai\/gpt-5/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /anthropic\/claude-sonnet-4-5 — usable/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the openai\/gpt-5 migration plan\./);
   assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro/);
   assert.deepEqual(
     participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
@@ -147,7 +161,7 @@ test("consensus command validates config, runs participants, prefers project con
     },
     {
       level: "info",
-      message: "pi-consensus participant pass executed; outputs collected and synthesis is not implemented yet.",
+      message: "pi-consensus participant pass executed; usable outputs collected and synthesis is not implemented yet.",
     },
   ]);
 });
@@ -174,6 +188,80 @@ test("consensus command shows a clear error when config is missing", async () =>
       level: "error",
       message:
         "Consensus config not found. Create .pi/consensus.json or ~/.pi/agent/consensus.json with at least 2 participant models.",
+    },
+  ]);
+});
+
+test("consensus command fails clearly when fewer than two usable participant outputs remain after filtering", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-filtered-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => {
+      if (invocation.model.provider === "anthropic") {
+        return {
+          model: invocation.model,
+          status: "completed",
+          output:
+            "Recommendation: update src/index.ts. Why: it centralizes dispatch. Risks/tradeoffs: medium migration cost. Confidence: 82%.",
+          inspectedRepo: true,
+          toolNamesUsed: ["read"],
+        };
+      }
+
+      if (invocation.model.provider === "openai") {
+        return {
+          model: invocation.model,
+          status: "completed",
+          output: "I'm sorry, but I can't help with that request.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
+      }
+
+      return {
+        model: invocation.model,
+        status: "failed",
+        failureReason: "participant subprocess exited with code 1",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+    { provider: "google", id: "gemini-2.5-pro" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-filtered-"));
+
+  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.match(
+    harness.sentMessages[0]?.content ?? "",
+    /Consensus requires at least 2 usable participant outputs but only 1 remained after filtering\./,
+  );
+  assert.match(harness.sentMessages[0]?.content ?? "", /openai\/gpt-5 — excluded/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Reason: refusal-only response/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro — failed/);
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "warning",
+      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
+    },
+    {
+      level: "error",
+      message: "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
     },
   ]);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runParticipantPass } from "../src/participants.ts";
+import { filterParticipantOutputs, runParticipantPass } from "../src/participants.ts";
 
 const config = {
   configPath: ".pi/consensus.json",
@@ -108,4 +108,49 @@ test("runParticipantPass captures failed participant executions for downstream h
       toolNamesUsed: [],
     },
   ]);
+});
+
+test("filterParticipantOutputs excludes refusal-only and vague answers and fails when fewer than two usable remain", () => {
+  const filtered = filterParticipantOutputs([
+    {
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+      status: "completed",
+      output:
+        "Recommendation: update src/index.ts. Why: it centralizes dispatch. Risks/tradeoffs: medium migration cost. Confidence: 82%.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    },
+    {
+      model: { provider: "openai", id: "gpt-5" },
+      status: "completed",
+      output: "I'm sorry, but I can't help with that request.",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+    {
+      model: { provider: "google", id: "gemini-2.5-pro" },
+      status: "completed",
+      output: "Maybe refactor it.",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+    {
+      model: { provider: "xai", id: "grok-4" },
+      status: "failed",
+      failureReason: "participant subprocess exited with code 1",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+  ]);
+
+  assert.equal(filtered.usable.length, 1);
+  assert.equal(filtered.excluded.length, 2);
+  assert.equal(filtered.failed.length, 1);
+  assert.equal(filtered.excluded[0]?.status, "excluded");
+  assert.equal(filtered.excluded[0]?.exclusionReason, "refusal-only response");
+  assert.equal(filtered.excluded[1]?.exclusionReason, "response was too vague to use for consensus");
+  assert.equal(
+    filtered.failureMessage,
+    "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
+  );
 });

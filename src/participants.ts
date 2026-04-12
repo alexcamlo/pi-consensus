@@ -34,6 +34,24 @@ export type ParticipantPassResult = {
   participants: ParticipantExecutionResult[];
 };
 
+export type FilteredParticipantResult = {
+  model: ConsensusModelRef;
+  status: "usable" | "excluded" | "failed";
+  output?: string;
+  failureReason?: string;
+  exclusionReason?: string;
+  inspectedRepo: boolean;
+  toolNamesUsed: string[];
+};
+
+export type ParticipantFilteringResult = {
+  participants: FilteredParticipantResult[];
+  usable: FilteredParticipantResult[];
+  excluded: FilteredParticipantResult[];
+  failed: FilteredParticipantResult[];
+  failureMessage?: string;
+};
+
 export async function runParticipantPass(
   options: {
     prompt: string;
@@ -71,6 +89,24 @@ export async function runParticipantPass(
   );
 
   return { participants };
+}
+
+export function filterParticipantOutputs(participants: ParticipantExecutionResult[]): ParticipantFilteringResult {
+  const filteredParticipants = participants.map(classifyParticipantOutput);
+  const usable = filteredParticipants.filter((participant) => participant.status === "usable");
+  const excluded = filteredParticipants.filter((participant) => participant.status === "excluded");
+  const failed = filteredParticipants.filter((participant) => participant.status === "failed");
+
+  return {
+    participants: filteredParticipants,
+    usable,
+    excluded,
+    failed,
+    failureMessage:
+      usable.length >= 2
+        ? undefined
+        : `Consensus requires at least 2 usable participant outputs but only ${usable.length} remained after filtering.`,
+  };
 }
 
 export function createParticipantSystemPrompt() {
@@ -206,6 +242,74 @@ export function buildParticipantCommand(invocation: ParticipantInvocation) {
     "--no-prompt-templates",
     invocation.prompt,
   ];
+}
+
+function classifyParticipantOutput(participant: ParticipantExecutionResult): FilteredParticipantResult {
+  if (participant.status === "failed") {
+    return {
+      ...participant,
+      status: "failed",
+    };
+  }
+
+  const output = participant.output?.trim() ?? "";
+  if (!output) {
+    return {
+      ...participant,
+      status: "excluded",
+      output,
+      exclusionReason: "empty response",
+    };
+  }
+
+  if (looksLikeRefusalOnly(output)) {
+    return {
+      ...participant,
+      status: "excluded",
+      output,
+      exclusionReason: "refusal-only response",
+    };
+  }
+
+  if (looksTooVague(output)) {
+    return {
+      ...participant,
+      status: "excluded",
+      output,
+      exclusionReason: "response was too vague to use for consensus",
+    };
+  }
+
+  return {
+    ...participant,
+    status: "usable",
+    output,
+  };
+}
+
+function looksLikeRefusalOnly(output: string) {
+  const normalized = output.replace(/\s+/g, " ").trim().toLowerCase();
+  if (normalized.length > 220) {
+    return false;
+  }
+
+  return [
+    /^(i('|’)m sorry[, ]+but )?i can('|’)t help with that request[.!]?$/,
+    /^(i('|’)m sorry[, ]+but )?i cannot help with that request[.!]?$/,
+    /^(i('|’)m sorry[, ]+but )?i can('|’)t assist with that[.!]?$/,
+    /^(i('|’)m sorry[, ]+but )?i cannot comply with that request[.!]?$/,
+    /^(i('|’)m sorry[, ]+but )?i don('|’)t have enough information to answer[.!]?$/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function looksTooVague(output: string) {
+  const normalized = output.replace(/\s+/g, " ").trim();
+  if (normalized.length >= 40) {
+    return false;
+  }
+
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 6;
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | undefined {
