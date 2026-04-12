@@ -3,9 +3,14 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
-import { filterParticipantOutputs, runParticipantPass, type ParticipantInvocationExecutor } from "./participants.ts";
+import {
+  filterParticipantOutputs,
+  runParticipantInvocation,
+  runParticipantPass,
+  type ParticipantInvocationExecutor,
+} from "./participants.ts";
 import { createConsensusExecutionResult } from "./result.ts";
-import { runConsensusSynthesis, type SynthesisInvocationExecutor } from "./synthesis.ts";
+import { runConsensusSynthesis, runSynthesisInvocation, type SynthesisInvocationExecutor } from "./synthesis.ts";
 
 const TOOL_NAME = "consensus";
 const COMMAND_NAME = "consensus";
@@ -88,10 +93,14 @@ export default function consensusExtension(
         return;
       }
 
+      const progress = createConsensusProgressState();
+      updateConsensusProgress(ctx, progress, "Validating consensus config...");
+
       let config: ResolvedConsensusConfig;
       try {
         config = validateConsensusContext(ctx);
       } catch (error) {
+        clearConsensusProgress(ctx);
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
         return;
       }
@@ -100,13 +109,18 @@ export default function consensusExtension(
         ctx.ui.notify(warning, "warning");
       }
 
+      for (const model of config.models) {
+        progress.participants.set(formatModelRef(model), "pending");
+      }
+      updateConsensusProgress(ctx, progress, "Running participant pass...");
+
       const participantPass = await runParticipantPass(
         {
           prompt,
           cwd: ctx.cwd ?? process.cwd(),
           config,
         },
-        dependencies.executeParticipantInvocation,
+        createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
       );
       const filteredParticipants = filterParticipantOutputs(participantPass.participants);
       const synthesis = filteredParticipants.failureMessage
@@ -119,7 +133,7 @@ export default function consensusExtension(
               usableParticipants: filteredParticipants.usable,
               excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
             },
-            dependencies.executeSynthesisInvocation,
+            createProgressSynthesisExecutor(progress, ctx, dependencies.executeSynthesisInvocation),
           );
       const result = createConsensusExecutionResult(
         prompt,
@@ -135,6 +149,8 @@ export default function consensusExtension(
         details: result.details,
         display: true,
       });
+
+      clearConsensusProgress(ctx);
 
       if (filteredParticipants.failureMessage) {
         ctx.ui.notify(filteredParticipants.failureMessage, "error");
@@ -158,6 +174,77 @@ function validateConsensusContext(ctx: {
     availableModels: ctx.modelRegistry?.getAvailable?.() ?? [],
     currentModel: ctx.model,
   });
+}
+
+type ConsensusProgressState = {
+  participants: Map<string, "pending" | "running" | "completed" | "failed">;
+  synthesis: "pending" | "running" | "completed" | "skipped";
+};
+
+function createConsensusProgressState(): ConsensusProgressState {
+  return {
+    participants: new Map(),
+    synthesis: "pending",
+  };
+}
+
+function createProgressParticipantExecutor(
+  progress: ConsensusProgressState,
+  ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } },
+  executor?: ParticipantInvocationExecutor,
+): ParticipantInvocationExecutor {
+  return async (invocation) => {
+    const model = formatModelRef(invocation.model);
+    progress.participants.set(model, "running");
+    updateConsensusProgress(ctx, progress, `Running participant pass... ${model}`);
+
+    const result = await (executor ?? runParticipantInvocation)(invocation);
+
+    progress.participants.set(model, result.status === "failed" ? "failed" : "completed");
+    updateConsensusProgress(ctx, progress, `Running participant pass... ${model}`);
+    return result;
+  };
+}
+
+function createProgressSynthesisExecutor(
+  progress: ConsensusProgressState,
+  ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } },
+  executor?: SynthesisInvocationExecutor,
+): SynthesisInvocationExecutor {
+  return async (invocation) => {
+    progress.synthesis = "running";
+    updateConsensusProgress(ctx, progress, "Running synthesis...");
+    const result = await (executor ?? runSynthesisInvocation)(invocation);
+    progress.synthesis = "completed";
+    updateConsensusProgress(ctx, progress, "Running synthesis...");
+    return result;
+  };
+}
+
+function updateConsensusProgress(
+  ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } },
+  progress: ConsensusProgressState,
+  status: string,
+) {
+  if (ctx.hasUI === false) {
+    return;
+  }
+
+  ctx.ui.setStatus?.("pi-consensus", status);
+  ctx.ui.setWidget?.("pi-consensus", [
+    "pi-consensus progress",
+    ...[...progress.participants.entries()].map(([model, participantStatus]) => `${model} — ${participantStatus}`),
+    `Synthesis — ${progress.synthesis === "pending" ? "waiting" : progress.synthesis}`,
+  ]);
+}
+
+function clearConsensusProgress(ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } }) {
+  if (ctx.hasUI === false) {
+    return;
+  }
+
+  ctx.ui.setStatus?.("pi-consensus", undefined);
+  ctx.ui.setWidget?.("pi-consensus", undefined);
 }
 
 function toScaffoldSummary(config: ResolvedConsensusConfig) {

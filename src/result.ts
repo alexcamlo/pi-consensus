@@ -44,36 +44,62 @@ export function createConsensusExecutionResult(
   const usableParticipantCount = participants.filter((participant) => participant.status === "usable").length;
   const excludedParticipantCount = participants.filter((participant) => participant.status === "excluded").length;
   const failedParticipantCount = participants.filter((participant) => participant.status === "failed").length;
+  const excludedParticipants = participants.filter((participant) => participant.status !== "usable");
+  const participantSummaries = synthesis?.participants ?? participants.map((participant) => ({ model: participant.model, summary: participant.status }));
   const text = [
-    synthesis ? "pi-consensus synthesis completed." : "pi-consensus participant filtering completed.",
-    `Prompt: ${prompt}`,
-    `Config: ${config.configPath}`,
-    `Participants: ${config.participants.join(", ")}`,
-    `Synthesis model: ${config.synthesisModel}`,
-    `Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
+    "# Consensus",
+    "",
+    "## Prompt",
+    prompt,
+    "",
+    ...(synthesis
+      ? ["## Answer", synthesis.consensusAnswer, ""]
+      : ["## Answer", failureMessage ?? "Consensus synthesis was skipped.", ""]),
+    "## Overall",
     ...(synthesis
       ? [
-          `Consensus answer: ${synthesis.consensusAnswer}`,
-          `Agreement: ${synthesis.overallAgreementPercent}% | Disagreement: ${synthesis.overallDisagreementPercent}% | Unclear: ${synthesis.overallUnclearPercent}%`,
-          `Confidence: ${synthesis.confidencePercent}% (${synthesis.confidenceLabel})`,
+          `- Agreement: ${synthesis.overallAgreementPercent}%`,
+          `- Disagreement: ${synthesis.overallDisagreementPercent}%`,
+          `- Unclear: ${synthesis.overallUnclearPercent}%`,
+          `- Confidence: ${synthesis.confidencePercent}% (${synthesis.confidenceLabel})`,
         ]
-      : []),
-    `Usable participants: ${usableParticipantCount}`,
-    `Excluded participants: ${excludedParticipantCount}`,
-    `Failed participants: ${failedParticipantCount}`,
-    "Participant results:",
+      : [
+          `- Usable participants: ${usableParticipantCount}`,
+          `- Excluded participants: ${excludedParticipantCount}`,
+          `- Failed participants: ${failedParticipantCount}`,
+        ]),
+    "",
+    "## Agreed points",
+    ...(synthesis?.agreedPoints.length
+      ? synthesis.agreedPoints.map(
+          (point) => `- ${point.point} — ${point.supportPercent}% (${point.supportingParticipants}/${point.totalParticipants})`,
+        )
+      : ["- None yet"]),
+    "",
+    "## Disagreements",
+    ...(synthesis?.disagreements.length
+      ? synthesis.disagreements.map((disagreement) => `- ${disagreement.point} — ${disagreement.summary}`)
+      : [failureMessage ? `- ${failureMessage}` : "- None noted"]),
+    "",
+    "## Participants",
+    ...participantSummaries.map((participant) => `- ${participant.model} — ${participant.summary}`),
+    "",
+    "## Excluded",
+    ...(synthesis?.excludedParticipants.length
+      ? synthesis.excludedParticipants.map((participant) => `- ${participant.model} — ${participant.reason}`)
+      : excludedParticipants.length
+        ? excludedParticipants.map((participant) => `- ${participant.model} — ${participant.status === "failed" ? (participant.failureReason ?? "failed") : (participant.exclusionReason ?? "excluded")}`)
+        : ["- None"]),
+    "",
+    "## Metadata",
+    `- Config: ${config.configPath}`,
+    `- Requested participants: ${config.participants.join(", ")}`,
+    `- Synthesis model: ${config.synthesisModel}`,
+    `- Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
+    `- Read-only posture: enabled`,
+    "",
+    "## Debug participant outputs",
     ...participants.flatMap((participant) => renderParticipantSummary(participant)),
-    failureMessage
-      ? `Status: ${failureMessage}`
-      : synthesis
-        ? "Status: synthesis completed from usable participant outputs."
-        : "Status: usable participant outputs collected; synthesis not implemented yet.",
-    "Read-only posture: no edit/write behavior is exposed.",
-    failureMessage
-      ? "Next steps: improve or retry excluded/failed participants before synthesis."
-      : synthesis
-        ? "Next steps: render the final result and persist it via the pi-native tool-result path."
-        : "Next steps: synthesize a consensus and persist the final tool result.",
   ].join("\n");
 
   return {
@@ -99,22 +125,24 @@ export function createConsensusExecutionResult(
 }
 
 function renderParticipantSummary(participant: ParticipantExecutionSummary) {
-  const headline = `- ${participant.model} — ${participant.status}`;
+  const headline = `### ${participant.model} — ${participant.status}`;
 
   if (participant.status === "failed") {
     return [
       headline,
-      `  Failure: ${participant.failureReason ?? "unknown error"}`,
-      `  Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
-      `  Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
+      `- Failure: ${participant.failureReason ?? "unknown error"}`,
+      `- Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
+      `- Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
+      "",
     ];
   }
 
   return [
     headline,
-    ...(participant.status === "excluded" ? [`  Reason: ${participant.exclusionReason ?? "excluded from consensus"}`] : []),
-    `  Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
-    `  Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
-    `  Output: ${participant.output ?? ""}`,
+    ...(participant.status === "excluded" ? [`- Reason: ${participant.exclusionReason ?? "excluded from consensus"}`] : []),
+    `- Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
+    `- Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
+    `- Output: ${participant.output ?? ""}`,
+    "",
   ];
 }

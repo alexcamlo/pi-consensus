@@ -63,12 +63,15 @@ Not allowed:
 
 ## Status
 
-Repository scaffolded as a pi extension package. Consensus runtime not implemented yet.
+Consensus config loading, parallel participant execution, usability filtering, synthesis, markdown/plain-text result rendering, and interactive progress updates are implemented. Pi-native tool-result persistence is still tracked separately in issue #8.
 
 ## Repo layout
 
-- `src/index.ts` — extension entrypoint
-- `src/config.ts` — initial config types
+- `src/index.ts` — extension entrypoint and `/consensus` command orchestration
+- `src/config.ts` — config loading and validation
+- `src/participants.ts` — read-only participant execution and filtering
+- `src/synthesis.ts` — structured synthesis execution and validation
+- `src/result.ts` — markdown/plain-text result rendering
 - `.pi/extensions/pi-consensus.ts` — project-local auto-discovery shim for pi
 - `package.json` — pi package metadata + scripts
 - `tsconfig.json` — TypeScript config for local typechecking

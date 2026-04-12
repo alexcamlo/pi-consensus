@@ -8,7 +8,7 @@ import consensusExtension from "../src/index.ts";
 import { createConsensusExecutionResult } from "../src/result.ts";
 import type { SynthesisExecutionResult } from "../src/synthesis.ts";
 
-test("createConsensusExecutionResult returns read-only filtering details", () => {
+test("createConsensusExecutionResult returns formatted consensus text with debug participant details", () => {
   const result = createConsensusExecutionResult(
     "review this repo",
     {
@@ -44,13 +44,12 @@ test("createConsensusExecutionResult returns read-only filtering details", () =>
     "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
   );
 
-  assert.match(result.text, /pi-consensus participant filtering completed\./);
-  assert.match(result.text, /Prompt: review this repo/);
-  assert.match(result.text, /Config: \.pi\/consensus.json/);
-  assert.match(result.text, /Participant results:/);
-  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — usable/);
-  assert.match(result.text, /openai\/gpt-5 — excluded/);
-  assert.match(result.text, /Reason: refusal-only response/);
+  assert.match(result.text, /^# Consensus/m);
+  assert.match(result.text, /## Prompt\s+review this repo/m);
+  assert.match(result.text, /## Excluded\s+- openai\/gpt-5 — refusal-only response\s+- google\/gemini-2\.5-pro — participant subprocess exited with code 1/m);
+  assert.match(result.text, /## Debug participant outputs/m);
+  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable/m);
+  assert.match(result.text, /Inspect src\/index\.ts first\./);
   assert.equal(result.details.status, "participant-pass-insufficient-usable");
   assert.equal(result.details.prompt, "review this repo");
   assert.equal(result.details.readOnly, true);
@@ -169,14 +168,18 @@ test("consensus command validates config, runs synthesis with full participant o
   await harness.registeredCommand?.handler("draft a migration plan", commandContext);
 
   assert.equal(harness.sentMessages.length, 1);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Config: .*\.pi\/consensus\.json/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /^# Consensus/m);
+  assert.match(harness.sentMessages[0]?.content ?? "", /## Metadata[\s\S]*Config: .*\.pi\/consensus\.json/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Synthesis model: openai\/gpt-5/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Consensus answer: Use the incremental migration plan\./);
-  assert.match(harness.sentMessages[0]?.content ?? "", /Agreement: 70% \| Disagreement: 20% \| Unclear: 10%/);
-  assert.match(harness.sentMessages[0]?.content ?? "", /anthropic\/claude-sonnet-4-5 — usable/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /## Answer\s+Use the incremental migration plan\./m);
+  assert.match(harness.sentMessages[0]?.content ?? "", /- Agreement: 70%/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /- Disagreement: 20%/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /- Unclear: 10%/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /## Participants\s+- anthropic\/claude-sonnet-4-5 — Recommended an incremental rollout\.\s+- openai\/gpt-5 — Also recommended an incremental rollout\./m);
+  assert.match(harness.sentMessages[0]?.content ?? "", /## Debug participant outputs/m);
   assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
   assert.match(harness.sentMessages[0]?.content ?? "", /Recommendation: adopt the openai\/gpt-5 migration plan\./);
-  assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro/);
+  assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro —/);
   assert.equal((harness.sentMessages[0]?.details as { synthesis?: { consensusAnswer?: string } })?.synthesis?.consensusAnswer, "Use the incremental migration plan.");
   assert.deepEqual(
     participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
@@ -225,6 +228,18 @@ test("consensus command validates config, runs synthesis with full participant o
       message: "pi-consensus participant pass and synthesis completed.",
     },
   ]);
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — running/.test(line))),
+  );
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — completed/.test(line))),
+  );
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — running/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — completed/.test(line))));
+  assert.ok(commandContext.statusUpdates.some((status) => /validating/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /participant pass/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /synthesis/i.test(status)));
+  assert.equal(commandContext.widgetCleared, true);
 });
 
 test("consensus command shows a clear error when config is missing", async () => {
@@ -427,9 +442,17 @@ function createCommandContext(
   availableModels: Array<{ provider: string; id: string }> = [],
 ) {
   const notifications: Array<{ message: string; level: string }> = [];
+  const statusUpdates: string[] = [];
+  const widgetUpdates: string[][] = [];
+  let widgetCleared = false;
 
   return {
     notifications,
+    statusUpdates,
+    widgetUpdates,
+    get widgetCleared() {
+      return widgetCleared;
+    },
     cwd,
     agentDir: undefined as string | undefined,
     model: undefined as { provider: string; id: string } | undefined,
@@ -439,6 +462,19 @@ function createCommandContext(
     ui: {
       notify: (message: string, level: string) => {
         notifications.push({ message, level });
+      },
+      setStatus: (_key: string, status: string | undefined) => {
+        if (status) {
+          statusUpdates.push(status);
+        }
+      },
+      setWidget: (_key: string, widget: string[] | undefined) => {
+        if (widget) {
+          widgetUpdates.push(widget);
+          return;
+        }
+
+        widgetCleared = true;
       },
     },
   };
