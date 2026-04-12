@@ -284,16 +284,33 @@ test("consensus tool validates config, runs synthesis with full participant outp
     },
   ]);
   assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — config validation/.test(line))),
+  );
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Selected participants — anthropic\/claude-sonnet-4-5, openai\/gpt-5/.test(line))),
+  );
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Selected synthesis model — openai\/gpt-5/.test(line))),
+  );
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Counts — usable: 0, failed: 0, excluded: 0, remaining: 2/.test(line))),
+  );
+  assert.ok(
     commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — running/.test(line))),
   );
   assert.ok(
     commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — completed/.test(line))),
   );
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — pre-synthesis gate/.test(line))));
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — running/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — response received/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — validating/.test(line))));
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — completed/.test(line))));
-  assert.ok(commandContext.statusUpdates.some((status) => /validating/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /validating consensus config/i.test(status)));
   assert.ok(commandContext.statusUpdates.some((status) => /participant pass/i.test(status)));
-  assert.ok(commandContext.statusUpdates.some((status) => /synthesis/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /pre-synthesis gate/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /synthesis response received/i.test(status)));
+  assert.ok(commandContext.statusUpdates.some((status) => /validating synthesis output/i.test(status)));
   assert.equal(commandContext.widgetCleared, true);
 });
 
@@ -319,8 +336,16 @@ test("consensus tool shows a clear error when config is missing", async () => {
       undefined,
       commandContext,
     ),
-    /Consensus config not found\. Create \.pi\/consensus\.json or ~\/\.pi\/agent\/consensus\.json with at least 2 participant models\./,
+    /Config validation failed: Consensus config not found\. Create \.pi\/consensus\.json or ~\/\.pi\/agent\/consensus\.json with at least 2 participant models\./,
   );
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "error",
+      message:
+        "Config validation failed: Consensus config not found. Create .pi/consensus.json or ~/.pi/agent/consensus.json with at least 2 participant models.",
+    },
+  ]);
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
   assert.equal(commandContext.widgetCleared, true);
 });
 
@@ -492,7 +517,7 @@ test("consensus tool clears progress and reports synthesis failures cleanly", as
       undefined,
       commandContext,
     ),
-    /synthesis subprocess exited with code 1/,
+    /Synthesis subprocess failed: synthesis subprocess exited with code 1/,
   );
 
   assert.deepEqual(commandContext.notifications, [
@@ -500,7 +525,105 @@ test("consensus tool clears progress and reports synthesis failures cleanly", as
       level: "warning",
       message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
     },
+    {
+      level: "error",
+      message: "Synthesis subprocess failed: synthesis subprocess exited with code 1",
+    },
   ]);
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — failed/.test(line))));
+  assert.equal(commandContext.widgetCleared, true);
+});
+
+test("consensus tool reports synthesis output validation failures with the synthesis-validation stage", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-validation-error-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => ({
+      model: invocation.model,
+      status: "completed",
+      output: "Recommendation: inspect src/index.ts. Why: central orchestration. Risks/tradeoffs: low. Confidence: 80%.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    }),
+    executeSynthesisInvocation: async (invocation) => ({
+      model: invocation.model,
+      output: {
+        consensusAnswer: "Use the incremental migration plan.",
+        overallAgreementPercent: 70,
+        overallDisagreementPercent: 20,
+        overallUnclearPercent: 10,
+        confidencePercent: 80,
+        confidenceLabel: "medium",
+        agreedPoints: [
+          {
+            point: "Roll out incrementally.",
+            supportPercent: 100,
+            supportingParticipants: -1,
+            totalParticipants: 2,
+          },
+        ],
+        disagreements: [],
+        participants: [
+          {
+            model: "anthropic/claude-sonnet-4-5",
+            summary: "Recommended an incremental rollout.",
+          },
+          {
+            model: "openai/gpt-5",
+            summary: "Also recommended an incremental rollout.",
+          },
+        ],
+        excludedParticipants: [],
+      },
+    }),
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-validation-error-"));
+
+  await assert.rejects(
+    harness.registeredTool?.execute(
+      "tool-call-synthesis-validation-error",
+      { prompt: "draft a migration plan" },
+      undefined,
+      undefined,
+      commandContext,
+    ),
+    /Synthesis output validation failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./,
+  );
+
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "warning",
+      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
+    },
+    {
+      level: "error",
+      message:
+        'Synthesis output validation failed: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer.',
+    },
+  ]);
+  assert.ok(commandContext.statusUpdates.some((status) => /Validating synthesis output/i.test(status)));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — failed/.test(line))));
+  assert.ok(
+    commandContext.widgetUpdates.some((lines) =>
+      lines.some((line) => /Failure — Synthesis output validation failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./.test(line)),
+    ),
+  );
   assert.equal(commandContext.widgetCleared, true);
 });
 

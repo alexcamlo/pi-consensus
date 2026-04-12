@@ -58,6 +58,13 @@ export type SynthesisExecutionResult = {
 
 export type SynthesisInvocationExecutor = (invocation: SynthesisInvocation) => Promise<SynthesisExecutionResult>;
 
+export class InvalidConsensusSynthesisOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidConsensusSynthesisOutputError";
+  }
+}
+
 export async function runConsensusSynthesis(
   options: {
     prompt: string;
@@ -67,6 +74,10 @@ export async function runConsensusSynthesis(
     excludedParticipants: Array<ExcludedParticipantResult | FailedParticipantResult>;
   },
   executeSynthesisInvocation: SynthesisInvocationExecutor = runSynthesisInvocation,
+  hooks: {
+    onResponseReceived?: () => void;
+    onValidationStarted?: () => void;
+  } = {},
 ): Promise<SynthesisExecutionResult> {
   const invocation: SynthesisInvocation = {
     model: options.config.synthesisModel,
@@ -79,6 +90,8 @@ export async function runConsensusSynthesis(
   };
 
   const result = await executeSynthesisInvocation(invocation);
+  hooks.onResponseReceived?.();
+  hooks.onValidationStarted?.();
   validateSynthesisOutput(result.output);
   return result;
 }
@@ -234,7 +247,7 @@ export async function runSynthesisInvocation(invocation: SynthesisInvocation): P
 
 export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
   if (!output || typeof output !== "object") {
-    throw new Error("Consensus synthesis output must be an object.");
+    throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output must be an object.");
   }
 
   requireString(output.consensusAnswer, "consensusAnswer");
@@ -242,7 +255,7 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
   requirePercent(output.overallDisagreementPercent, "overallDisagreementPercent");
   requirePercent(output.overallUnclearPercent, "overallUnclearPercent");
   if (output.overallAgreementPercent + output.overallDisagreementPercent + output.overallUnclearPercent !== 100) {
-    throw new Error("Consensus synthesis output overallAgreementPercent, overallDisagreementPercent, and overallUnclearPercent must sum to 100.");
+    throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output overallAgreementPercent, overallDisagreementPercent, and overallUnclearPercent must sum to 100.");
   }
 
   requirePercent(output.confidencePercent, "confidencePercent");
@@ -254,7 +267,7 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
 
   for (const point of output.agreedPoints) {
     if (!point || typeof point !== "object") {
-      throw new Error("Consensus synthesis output agreedPoints entries must be objects.");
+      throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output agreedPoints entries must be objects.");
     }
     requireString(point.point, "agreedPoints[].point");
     requirePercent(point.supportPercent, "agreedPoints[].supportPercent");
@@ -264,7 +277,7 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
 
   for (const disagreement of output.disagreements) {
     if (!disagreement || typeof disagreement !== "object") {
-      throw new Error("Consensus synthesis output disagreements entries must be objects.");
+      throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output disagreements entries must be objects.");
     }
     requireString(disagreement.point, "disagreements[].point");
     requireString(disagreement.summary, "disagreements[].summary");
@@ -272,7 +285,7 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
 
   for (const participant of output.participants) {
     if (!participant || typeof participant !== "object") {
-      throw new Error("Consensus synthesis output participants entries must be objects.");
+      throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output participants entries must be objects.");
     }
     requireString(participant.model, "participants[].model");
     requireString(participant.summary, "participants[].summary");
@@ -280,7 +293,7 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
 
   for (const excluded of output.excludedParticipants) {
     if (!excluded || typeof excluded !== "object") {
-      throw new Error("Consensus synthesis output excludedParticipants entries must be objects.");
+      throw new InvalidConsensusSynthesisOutputError("Consensus synthesis output excludedParticipants entries must be objects.");
     }
     requireString(excluded.model, "excludedParticipants[].model");
     requireString(excluded.reason, "excludedParticipants[].reason");
@@ -289,25 +302,25 @@ export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
 
 function requireString(value: unknown, fieldName: string) {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`Consensus synthesis output field "${fieldName}" must be a non-empty string.`);
+    throw new InvalidConsensusSynthesisOutputError(`Consensus synthesis output field "${fieldName}" must be a non-empty string.`);
   }
 }
 
 function requirePercent(value: unknown, fieldName: string) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
-    throw new Error(`Consensus synthesis output field "${fieldName}" must be a number between 0 and 100.`);
+    throw new InvalidConsensusSynthesisOutputError(`Consensus synthesis output field "${fieldName}" must be a number between 0 and 100.`);
   }
 }
 
 function requireArray(value: unknown, fieldName: string) {
   if (!Array.isArray(value)) {
-    throw new Error(`Consensus synthesis output field "${fieldName}" must be an array.`);
+    throw new InvalidConsensusSynthesisOutputError(`Consensus synthesis output field "${fieldName}" must be an array.`);
   }
 }
 
 function requireNonNegativeInteger(value: unknown, fieldName: string) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`Consensus synthesis output field "${fieldName}" must be a non-negative integer.`);
+    throw new InvalidConsensusSynthesisOutputError(`Consensus synthesis output field "${fieldName}" must be a non-negative integer.`);
   }
 }
 
