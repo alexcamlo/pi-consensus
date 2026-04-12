@@ -14,7 +14,7 @@ type ModelLike = {
   id: string;
 };
 
-type RawModelRef = string | { provider?: unknown; id?: unknown };
+type RawModelRef = string | { provider?: unknown; id?: unknown; contextWindow?: unknown };
 
 type RawConsensusConfig = {
   models?: unknown;
@@ -28,6 +28,7 @@ type RawConsensusConfig = {
 export type ConsensusModelRef = {
   provider: string;
   id: string;
+  contextWindow?: number;
 };
 
 export type ConsensusConfig = {
@@ -219,21 +220,35 @@ function normalizeModelRef(value: unknown, fieldName: string): ConsensusModelRef
     const parts = value.split("/");
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
       throw new ConsensusConfigError(
-        `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id } objects.`,
+        `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow? } objects.`,
       );
     }
     return { provider: parts[0], id: parts[1] };
   }
 
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    const model = value as RawModelRef & { provider?: unknown; id?: unknown };
+    const model = value as RawModelRef & { provider?: unknown; id?: unknown; contextWindow?: unknown };
     if (typeof model.provider === "string" && typeof model.id === "string" && model.provider && model.id) {
-      return { provider: model.provider, id: model.id };
+      return {
+        provider: model.provider,
+        id: model.id,
+        ...(model.contextWindow === undefined ? {} : { contextWindow: normalizeContextWindow(model.contextWindow, fieldName) }),
+      };
     }
   }
 
   throw new ConsensusConfigError(
-    `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id } objects.`,
+    `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow? } objects.`,
+  );
+}
+
+function normalizeContextWindow(value: unknown, fieldName: string) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  throw new ConsensusConfigError(
+    `Consensus config field "${fieldName}.contextWindow" must be a positive integer number of tokens.`,
   );
 }
 

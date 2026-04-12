@@ -32,6 +32,28 @@ Planned config locations:
 
 If project config exists, it replaces global config entirely.
 
+Example:
+
+```json
+{
+  "models": [
+    "anthropic/claude-sonnet-4-5",
+    {
+      "provider": "openrouter",
+      "id": "google/gemma-4-31b-it:free",
+      "contextWindow": 128000
+    }
+  ],
+  "synthesisModel": {
+    "provider": "openai",
+    "id": "gpt-5",
+    "contextWindow": 400000
+  }
+}
+```
+
+`contextWindow` is optional per object-form model reference and is preserved as metadata for downstream prompt-sizing decisions.
+
 ## Safety
 
 This extension is intended to be read-only.
