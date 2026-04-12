@@ -3,13 +3,17 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
-import { createConsensusScaffoldResult } from "./scaffold.ts";
+import { runParticipantPass, type ParticipantInvocationExecutor } from "./participants.ts";
+import { createConsensusExecutionResult } from "./result.ts";
 
 const TOOL_NAME = "consensus";
 const COMMAND_NAME = "consensus";
 const MESSAGE_TYPE = "consensus-scaffold";
 
-export default function consensusExtension(pi: ExtensionAPI) {
+export default function consensusExtension(
+  pi: ExtensionAPI,
+  dependencies: { executeParticipantInvocation?: ParticipantInvocationExecutor } = {},
+) {
   pi.on("session_start", async (event, ctx) => {
     if (event.reason === "startup" || event.reason === "reload") {
       ctx.ui.setStatus("pi-consensus", "pi-consensus loaded (config validation scaffold)");
@@ -34,7 +38,19 @@ export default function consensusExtension(pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const config = validateConsensusContext(ctx);
-      const result = createConsensusScaffoldResult(params.prompt, toScaffoldSummary(config));
+      const participantPass = await runParticipantPass(
+        {
+          prompt: params.prompt,
+          cwd: ctx.cwd ?? process.cwd(),
+          config,
+        },
+        dependencies.executeParticipantInvocation,
+      );
+      const result = createConsensusExecutionResult(
+        params.prompt,
+        toScaffoldSummary(config),
+        participantPass.participants.map(toParticipantSummary),
+      );
 
       return {
         content: [{ type: "text", text: result.text }],
@@ -65,7 +81,19 @@ export default function consensusExtension(pi: ExtensionAPI) {
         ctx.ui.notify(warning, "warning");
       }
 
-      const result = createConsensusScaffoldResult(prompt, toScaffoldSummary(config));
+      const participantPass = await runParticipantPass(
+        {
+          prompt,
+          cwd: ctx.cwd ?? process.cwd(),
+          config,
+        },
+        dependencies.executeParticipantInvocation,
+      );
+      const result = createConsensusExecutionResult(
+        prompt,
+        toScaffoldSummary(config),
+        participantPass.participants.map(toParticipantSummary),
+      );
 
       pi.sendMessage({
         customType: MESSAGE_TYPE,
@@ -74,7 +102,7 @@ export default function consensusExtension(pi: ExtensionAPI) {
         display: true,
       });
 
-      ctx.ui.notify("pi-consensus scaffold executed; config validated and multi-model runner not implemented yet.", "info");
+      ctx.ui.notify("pi-consensus participant pass executed; outputs collected and synthesis is not implemented yet.", "info");
     },
   });
 }
@@ -99,5 +127,23 @@ function toScaffoldSummary(config: ResolvedConsensusConfig) {
     participants: config.models.map(formatModelRef),
     synthesisModel: formatModelRef(config.synthesisModel),
     warnings: config.warnings,
+  };
+}
+
+function toParticipantSummary(participant: {
+  model: { provider: string; id: string };
+  status: "completed" | "failed";
+  output?: string;
+  failureReason?: string;
+  inspectedRepo: boolean;
+  toolNamesUsed: string[];
+}) {
+  return {
+    model: formatModelRef(participant.model),
+    status: participant.status,
+    output: participant.output,
+    failureReason: participant.failureReason,
+    inspectedRepo: participant.inspectedRepo,
+    toolNamesUsed: participant.toolNamesUsed,
   };
 }

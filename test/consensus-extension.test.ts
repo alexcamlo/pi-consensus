@@ -5,28 +5,49 @@ import { join } from "node:path";
 import test from "node:test";
 
 import consensusExtension from "../src/index.ts";
-import { createConsensusScaffoldResult } from "../src/scaffold.ts";
+import { createConsensusExecutionResult } from "../src/result.ts";
 
-test("createConsensusScaffoldResult returns read-only placeholder details", () => {
-  const result = createConsensusScaffoldResult("review this repo", {
-    configPath: ".pi/consensus.json",
-    participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-    synthesisModel: "openai/gpt-5",
-    warnings: ["Duplicate participant models were deduplicated."],
-  });
+test("createConsensusExecutionResult returns read-only participant-pass details", () => {
+  const result = createConsensusExecutionResult(
+    "review this repo",
+    {
+      configPath: ".pi/consensus.json",
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisModel: "openai/gpt-5",
+      warnings: ["Duplicate participant models were deduplicated."],
+    },
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        status: "completed",
+        output: "Inspect src/index.ts first.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      },
+      {
+        model: "openai/gpt-5",
+        status: "failed",
+        failureReason: "participant subprocess exited with code 1",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+    ],
+  );
 
-  assert.match(result.text, /pi-consensus scaffold is installed\./);
+  assert.match(result.text, /pi-consensus participant pass completed\./);
   assert.match(result.text, /Prompt: review this repo/);
   assert.match(result.text, /Config: \.pi\/consensus.json/);
-  assert.match(result.text, /Participants: anthropic\/claude-sonnet-4-5, openai\/gpt-5/);
-  assert.equal(result.details.status, "scaffolded");
+  assert.match(result.text, /Participant results:/);
+  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — completed/);
+  assert.equal(result.details.status, "participant-pass-complete");
   assert.equal(result.details.prompt, "review this repo");
   assert.equal(result.details.readOnly, true);
   assert.equal(result.details.config?.participants.length, 2);
+  assert.equal(result.details.participants.length, 2);
   assert.ok(result.details.nextSteps.length >= 3);
 });
 
-test("consensus command validates config, prefers project config, and reports warnings", async () => {
+test("consensus command validates config, runs participants, prefers project config, and reports warnings", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-project-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-"));
 
@@ -55,7 +76,26 @@ test("consensus command validates config, prefers project config, and reports wa
   );
 
   const harness = createExtensionHarness();
-  consensusExtension(harness.pi as never);
+  const participantInvocations: Array<{ model: string; cwd: string; prompt: string; allowedTools: string[]; systemPrompt: string }> = [];
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => {
+      participantInvocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        cwd: invocation.cwd,
+        prompt: invocation.prompt,
+        allowedTools: invocation.allowedTools,
+        systemPrompt: invocation.systemPrompt,
+      });
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: `participant output from ${invocation.model.provider}/${invocation.model.id}`,
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      };
+    },
+  });
 
   const commandContext = createCommandContext(projectDir, [
     { provider: "anthropic", id: "claude-sonnet-4-5" },
@@ -70,7 +110,28 @@ test("consensus command validates config, prefers project config, and reports wa
   assert.equal(harness.sentMessages.length, 1);
   assert.match(harness.sentMessages[0]?.content ?? "", /Config: .*\.pi\/consensus\.json/);
   assert.match(harness.sentMessages[0]?.content ?? "", /Synthesis model: openai\/gpt-5/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /Participant results:/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /participant output from anthropic\/claude-sonnet-4-5/);
+  assert.match(harness.sentMessages[0]?.content ?? "", /participant output from openai\/gpt-5/);
   assert.doesNotMatch(harness.sentMessages[0]?.content ?? "", /google\/gemini-2\.5-pro/);
+  assert.deepEqual(
+    participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        cwd: projectDir,
+        prompt: "draft a migration plan",
+        allowedTools: ["read", "ls", "find", "grep"],
+      },
+      {
+        model: "openai/gpt-5",
+        cwd: projectDir,
+        prompt: "draft a migration plan",
+        allowedTools: ["read", "ls", "find", "grep"],
+      },
+    ],
+  );
+  assert.match(participantInvocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
@@ -86,7 +147,7 @@ test("consensus command validates config, prefers project config, and reports wa
     },
     {
       level: "info",
-      message: "pi-consensus scaffold executed; config validated and multi-model runner not implemented yet.",
+      message: "pi-consensus participant pass executed; outputs collected and synthesis is not implemented yet.",
     },
   ]);
 });
