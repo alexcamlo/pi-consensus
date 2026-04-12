@@ -63,8 +63,8 @@ test("runParticipantPass executes participant invocations in parallel with read-
   ]);
   assert.deepEqual(invocations.map((entry) => entry.cwd), ["/tmp/project", "/tmp/project"]);
   assert.deepEqual(invocations.map((entry) => entry.allowedTools), [
-    ["read", "ls", "find", "grep"],
-    ["read", "ls", "find", "grep"],
+    ["read", "ls", "find", "grep", "multi_grep"],
+    ["read", "ls", "find", "grep", "multi_grep"],
   ]);
   assert.match(invocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
   assert.deepEqual(result.participants.map((participant) => participant.status), ["completed", "completed"]);

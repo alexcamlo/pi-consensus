@@ -5,6 +5,7 @@ import { getAgentDir } from "@mariozechner/pi-coding-agent";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const MIN_PARTICIPANTS = 2;
+const MAX_PARTICIPANTS = 8;
 
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
@@ -94,6 +95,12 @@ export function loadConsensusConfig(options: {
   const participants = normalizeParticipantModels(rawConfig.models, warnings);
   if (participants.length < MIN_PARTICIPANTS) {
     throw new ConsensusConfigError("Consensus config must contain at least 2 unique participant models.");
+  }
+
+  if (participants.length > MAX_PARTICIPANTS) {
+    throw new ConsensusConfigError(
+      `Consensus config supports at most ${MAX_PARTICIPANTS} unique participant models for safety.`,
+    );
   }
 
   validateModelsAvailable(participants, options.availableModels, "participant");

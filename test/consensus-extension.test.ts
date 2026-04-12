@@ -188,13 +188,13 @@ test("consensus command validates config, runs synthesis with full participant o
         model: "anthropic/claude-sonnet-4-5",
         cwd: projectDir,
         prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep"],
+        allowedTools: ["read", "ls", "find", "grep", "multi_grep"],
       },
       {
         model: "openai/gpt-5",
         cwd: projectDir,
         prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep"],
+        allowedTools: ["read", "ls", "find", "grep", "multi_grep"],
       },
     ],
   );
@@ -371,6 +371,105 @@ test("consensus tool fails clearly when fewer than two unique participant models
       },
     ),
     /Consensus config must contain at least 2 unique participant models\./,
+  );
+});
+
+test("consensus command clears progress and reports synthesis failures cleanly", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-error-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => ({
+      model: invocation.model,
+      status: "completed",
+      output: "Recommendation: inspect src/index.ts. Why: central orchestration. Risks/tradeoffs: low. Confidence: 80%.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read", "multi_grep"],
+    }),
+    executeSynthesisInvocation: async () => {
+      throw new Error("synthesis subprocess exited with code 1");
+    },
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-error-"));
+
+  await harness.registeredCommand?.handler("draft a migration plan", commandContext);
+
+  assert.equal(harness.sentMessages.length, 0);
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "warning",
+      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
+    },
+    {
+      level: "error",
+      message: "synthesis subprocess exited with code 1",
+    },
+  ]);
+  assert.equal(commandContext.widgetCleared, true);
+});
+
+test("consensus tool fails clearly when participant count exceeds the safety cap", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-too-many-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: [
+        "anthropic/claude-sonnet-4-5",
+        "openai/gpt-5",
+        "google/gemini-2.5-pro",
+        "xai/grok-4",
+        "openrouter/anthropic-claude-3.7-sonnet",
+        "openrouter/openai-gpt-4.1",
+        "deepseek/deepseek-chat",
+        "moonshot/kimi-k2",
+        "mistral/mistral-large",
+      ],
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  await assert.rejects(
+    harness.registeredTool?.execute(
+      "tool-call-2",
+      { prompt: "draft a migration plan" },
+      undefined,
+      undefined,
+      {
+        cwd: projectDir,
+        agentDir: mkdtempSync(join(tmpdir(), "pi-consensus-agent-too-many-")),
+        model: { provider: "openai", id: "gpt-5" },
+        modelRegistry: {
+          getAvailable: () => [
+            { provider: "anthropic", id: "claude-sonnet-4-5" },
+            { provider: "openai", id: "gpt-5" },
+            { provider: "google", id: "gemini-2.5-pro" },
+            { provider: "xai", id: "grok-4" },
+            { provider: "openrouter", id: "anthropic-claude-3.7-sonnet" },
+            { provider: "openrouter", id: "openai-gpt-4.1" },
+            { provider: "deepseek", id: "deepseek-chat" },
+            { provider: "moonshot", id: "kimi-k2" },
+            { provider: "mistral", id: "mistral-large" },
+          ],
+        },
+      },
+    ),
+    /supports at most 8 unique participant models/,
   );
 });
 

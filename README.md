@@ -63,7 +63,7 @@ Not allowed:
 
 ## Status
 
-Consensus config loading, parallel participant execution, usability filtering, synthesis, markdown/plain-text result rendering, and interactive progress updates are implemented. Pi-native tool-result persistence is still tracked separately in issue #8.
+Consensus config loading, parallel participant execution, usability filtering, synthesis, markdown/plain-text result rendering, interactive progress updates, safety-capped participant counts, and clean command-side failure handling are implemented. Pi-native tool-result persistence is still tracked separately in issue #8.
 
 ## Repo layout
 

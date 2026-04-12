@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
 
-export const PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
+export const PARTICIPANT_TOOLS = ["read", "ls", "find", "grep", "multi_grep"] as const;
 
 export type ParticipantInvocation = {
   model: ConsensusModelRef;

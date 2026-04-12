@@ -94,70 +94,74 @@ export default function consensusExtension(
       }
 
       const progress = createConsensusProgressState();
-      updateConsensusProgress(ctx, progress, "Validating consensus config...");
 
-      let config: ResolvedConsensusConfig;
       try {
-        config = validateConsensusContext(ctx);
-      } catch (error) {
-        clearConsensusProgress(ctx);
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        return;
-      }
+        updateConsensusProgress(ctx, progress, "Validating consensus config...");
 
-      for (const warning of config.warnings) {
-        ctx.ui.notify(warning, "warning");
-      }
+        const config: ResolvedConsensusConfig = validateConsensusContext(ctx);
 
-      for (const model of config.models) {
-        progress.participants.set(formatModelRef(model), "pending");
-      }
-      updateConsensusProgress(ctx, progress, "Running participant pass...");
+        for (const warning of config.warnings) {
+          ctx.ui.notify(warning, "warning");
+        }
 
-      const participantPass = await runParticipantPass(
-        {
+        for (const model of config.models) {
+          progress.participants.set(formatModelRef(model), "pending");
+        }
+        updateConsensusProgress(ctx, progress, "Running participant pass...");
+
+        const participantPass = await runParticipantPass(
+          {
+            prompt,
+            cwd: ctx.cwd ?? process.cwd(),
+            config,
+          },
+          createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
+        );
+        const filteredParticipants = filterParticipantOutputs(participantPass.participants);
+
+        if (filteredParticipants.failureMessage) {
+          progress.synthesis = "skipped";
+          updateConsensusProgress(ctx, progress, "Skipping synthesis...");
+        }
+
+        const synthesis = filteredParticipants.failureMessage
+          ? undefined
+          : await runConsensusSynthesis(
+              {
+                prompt,
+                cwd: ctx.cwd ?? process.cwd(),
+                config,
+                usableParticipants: filteredParticipants.usable,
+                excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
+              },
+              createProgressSynthesisExecutor(progress, ctx, dependencies.executeSynthesisInvocation),
+            );
+        const result = createConsensusExecutionResult(
           prompt,
-          cwd: ctx.cwd ?? process.cwd(),
-          config,
-        },
-        createProgressParticipantExecutor(progress, ctx, dependencies.executeParticipantInvocation),
-      );
-      const filteredParticipants = filterParticipantOutputs(participantPass.participants);
-      const synthesis = filteredParticipants.failureMessage
-        ? undefined
-        : await runConsensusSynthesis(
-            {
-              prompt,
-              cwd: ctx.cwd ?? process.cwd(),
-              config,
-              usableParticipants: filteredParticipants.usable,
-              excludedParticipants: [...filteredParticipants.excluded, ...filteredParticipants.failed],
-            },
-            createProgressSynthesisExecutor(progress, ctx, dependencies.executeSynthesisInvocation),
-          );
-      const result = createConsensusExecutionResult(
-        prompt,
-        toScaffoldSummary(config),
-        filteredParticipants.participants.map(toParticipantSummary),
-        filteredParticipants.failureMessage,
-        synthesis?.output,
-      );
+          toScaffoldSummary(config),
+          filteredParticipants.participants.map(toParticipantSummary),
+          filteredParticipants.failureMessage,
+          synthesis?.output,
+        );
 
-      pi.sendMessage({
-        customType: MESSAGE_TYPE,
-        content: result.text,
-        details: result.details,
-        display: true,
-      });
+        pi.sendMessage({
+          customType: MESSAGE_TYPE,
+          content: result.text,
+          details: result.details,
+          display: true,
+        });
 
-      clearConsensusProgress(ctx);
+        if (filteredParticipants.failureMessage) {
+          ctx.ui.notify(filteredParticipants.failureMessage, "error");
+          return;
+        }
 
-      if (filteredParticipants.failureMessage) {
-        ctx.ui.notify(filteredParticipants.failureMessage, "error");
-        return;
+        ctx.ui.notify("pi-consensus participant pass and synthesis completed.", "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      } finally {
+        clearConsensusProgress(ctx);
       }
-
-      ctx.ui.notify("pi-consensus participant pass and synthesis completed.", "info");
     },
   });
 }
