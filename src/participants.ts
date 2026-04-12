@@ -3,7 +3,8 @@ import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
 
-export const PARTICIPANT_TOOLS = ["read", "ls", "find", "grep", "multi_grep"] as const;
+export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep", "multi_grep"] as const;
+export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
 
 export type ParticipantInvocation = {
   model: ConsensusModelRef;
@@ -73,7 +74,7 @@ export async function runParticipantPass(
         cwd,
         prompt,
         systemPrompt: createParticipantSystemPrompt(),
-        allowedTools: [...PARTICIPANT_TOOLS],
+        allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS],
         thinking: config.participantThinking,
         timeoutMs: config.participantTimeoutMs,
       };
@@ -118,7 +119,7 @@ export function createParticipantSystemPrompt() {
     "You are participating in a read-only first-pass consensus run.",
     "Answer the user's prompt directly and choose one primary recommendation.",
     "If the user's request depends on repository context, inspect the relevant files before answering.",
-    `You may only use these tools: ${PARTICIPANT_TOOLS.join(", ")}.`,
+    `You may only use these tools: ${SUBPROCESS_SAFE_PARTICIPANT_TOOLS.join(", ")}.`,
     "Never edit or write files.",
     "Structure your answer with: recommendation, why, risks/tradeoffs, and confidence.",
   ].join(" ");

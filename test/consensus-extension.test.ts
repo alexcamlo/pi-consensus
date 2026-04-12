@@ -72,8 +72,10 @@ test("consensus command relays through a hidden assistant tool-call message when
       customType: "consensus-command",
       content: [
         "Call the consensus tool immediately.",
+        "Your entire response must be exactly one consensus tool call.",
         "Do not answer from your own knowledge.",
-        "Do not add assistant prose before or after the tool result.",
+        "Do not emit assistant prose, summaries, or follow-up text before or after the tool result.",
+        "After the tool result is returned, stop.",
         "Use this exact tool argument JSON:",
         JSON.stringify({ prompt: "draft a migration plan" }),
       ].join("\n\n"),
@@ -241,13 +243,13 @@ test("consensus tool validates config, runs synthesis with full participant outp
         model: "anthropic/claude-sonnet-4-5",
         cwd: projectDir,
         prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep", "multi_grep"],
+        allowedTools: ["read", "ls", "find", "grep"],
       },
       {
         model: "openai/gpt-5",
         cwd: projectDir,
         prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep", "multi_grep"],
+        allowedTools: ["read", "ls", "find", "grep"],
       },
     ],
   );

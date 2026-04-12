@@ -159,8 +159,10 @@ async function executeConsensusWorkflow(
 function createConsensusRelayInstruction(prompt: string) {
   return [
     "Call the consensus tool immediately.",
+    "Your entire response must be exactly one consensus tool call.",
     "Do not answer from your own knowledge.",
-    "Do not add assistant prose before or after the tool result.",
+    "Do not emit assistant prose, summaries, or follow-up text before or after the tool result.",
+    "After the tool result is returned, stop.",
     "Use this exact tool argument JSON:",
     JSON.stringify({ prompt }),
   ].join("\n\n");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterParticipantOutputs, runParticipantPass } from "../src/participants.ts";
+import { createParticipantSystemPrompt, filterParticipantOutputs, runParticipantPass } from "../src/participants.ts";
 
 const config = {
   configPath: ".pi/consensus.json",
@@ -14,7 +14,7 @@ const config = {
   warnings: [],
 };
 
-test("runParticipantPass executes participant invocations in parallel with read-only settings", async () => {
+test("runParticipantPass executes participant invocations in parallel with subprocess-safe read-only settings", async () => {
   let concurrent = 0;
   let maxConcurrent = 0;
   const invocations: Array<{
@@ -63,11 +63,20 @@ test("runParticipantPass executes participant invocations in parallel with read-
   ]);
   assert.deepEqual(invocations.map((entry) => entry.cwd), ["/tmp/project", "/tmp/project"]);
   assert.deepEqual(invocations.map((entry) => entry.allowedTools), [
-    ["read", "ls", "find", "grep", "multi_grep"],
-    ["read", "ls", "find", "grep", "multi_grep"],
+    ["read", "ls", "find", "grep"],
+    ["read", "ls", "find", "grep"],
   ]);
   assert.match(invocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
+  assert.doesNotMatch(invocations[0]?.systemPrompt ?? "", /multi_grep/);
   assert.deepEqual(result.participants.map((participant) => participant.status), ["completed", "completed"]);
+});
+
+
+test("createParticipantSystemPrompt only advertises subprocess-safe participant tools", () => {
+  const prompt = createParticipantSystemPrompt();
+
+  assert.match(prompt, /You may only use these tools: read, ls, find, grep\./);
+  assert.doesNotMatch(prompt, /multi_grep/);
 });
 
 test("runParticipantPass captures failed participant executions for downstream handling", async () => {
