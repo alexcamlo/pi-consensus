@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
+import { Markdown, Container, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { formatModelRef, loadConsensusConfig, type ResolvedConsensusConfig } from "./config.ts";
@@ -51,6 +53,19 @@ export default function consensusExtension(
         stance: params.stance as "for" | "against" | "neutral" | undefined,
         focus: params.focus as "security" | "performance" | "maintainability" | "implementation speed" | "user value" | undefined,
       });
+    },
+    renderResult(result) {
+      const container = new Container();
+
+      // Main result markdown
+      const markdownText = result.content[0]?.type === "text" ? result.content[0].text : "";
+      if (markdownText) {
+        const mdTheme = getMarkdownTheme();
+        const md = new Markdown(markdownText, 0, 0, mdTheme);
+        container.addChild(md);
+      }
+
+      return container;
     },
   });
 
