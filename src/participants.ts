@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
+import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig, type Stance, type Focus } from "./config.ts";
 
 export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep", "multi_grep"] as const;
 export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
@@ -180,7 +180,7 @@ export async function runParticipantPass(
         model,
         cwd,
         prompt,
-        systemPrompt: createParticipantSystemPrompt(),
+        systemPrompt: createParticipantSystemPrompt(model.stance, model.focus),
         allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS],
         thinking: config.participantThinking,
         timeoutMs: config.participantTimeoutMs,
@@ -268,21 +268,52 @@ export function filterParticipantOutputs(
   };
 }
 
-export function createParticipantSystemPrompt() {
-  return [
+export function createParticipantSystemPrompt(stance?: Stance, focus?: Focus) {
+  const sections: string[] = [
     "You are participating in a read-only first-pass consensus run.",
     "Answer the user's prompt directly and choose one primary recommendation.",
     "If the user's request depends on repository context, inspect the relevant files before answering.",
     `You may only use these tools: ${SUBPROCESS_SAFE_PARTICIPANT_TOOLS.join(", ")}.`,
     "Never edit or write files.",
-    "Your response must include all of the following sections:",
-    "- Recommendation: A clear, actionable recommendation that answers the user's prompt.",
-    "- Why: Rationale explaining your reasoning and how you reached this recommendation.",
-    "- Risks/tradeoffs: Potential downsides, risks, or tradeoffs of your recommendation.",
-    "- Confidence: Your confidence level (e.g., high, medium, low) with a brief justification.",
-    "- Repo evidence: When relevant, cite specific files, patterns, or evidence from the repository that support your recommendation.",
-    "Be specific and concrete; vague or overly brief responses may be excluded from consensus.",
-  ].join(" ");
+  ];
+
+  // Add stance/focus framing if provided
+  if (stance || focus) {
+    sections.push("");
+    sections.push("Your perspective for this consensus:");
+
+    if (stance) {
+      switch (stance) {
+        case "for":
+          sections.push("- Stance: Supportive — Look for the merits and potential in the proposal. Acknowledge tradeoffs honestly, but emphasize what could work well. You must still reject clearly bad ideas if the evidence is strong against them.");
+          break;
+        case "against":
+          sections.push("- Stance: Critical — Scrutinize the proposal for risks, downsides, and alternatives. Challenge assumptions, but acknowledge genuinely good aspects if the evidence supports them.");
+          break;
+        case "neutral":
+          sections.push("- Stance: Neutral — Evaluate based on the actual weight of evidence. Do not artificially balance pros and cons; if the evidence clearly favors one side, say so. Represent the evidence as it is.");
+          break;
+      }
+    }
+
+    if (focus) {
+      sections.push(`- Focus: ${focus.charAt(0).toUpperCase() + focus.slice(1)} — Prioritize evaluating this proposal from the perspective of ${focus}. Consider how the recommendation affects ${focus} above other dimensions.`);
+    }
+
+    sections.push("");
+    sections.push("Truthfulness guardrail: Your stance and focus guide your emphasis, not your honesty. Always be truthful. If you are supportive but the evidence strongly opposes the proposal, you must reject it. If you are critical but the evidence strongly supports the proposal, you must acknowledge this.");
+  }
+
+  sections.push("");
+  sections.push("Your response must include all of the following sections:");
+  sections.push("- Recommendation: A clear, actionable recommendation that answers the user's prompt.");
+  sections.push("- Why: Rationale explaining your reasoning and how you reached this recommendation.");
+  sections.push("- Risks/tradeoffs: Potential downsides, risks, or tradeoffs of your recommendation.");
+  sections.push("- Confidence: Your confidence level (e.g., high, medium, low) with a brief justification.");
+  sections.push("- Repo evidence: When relevant, cite specific files, patterns, or evidence from the repository that support your recommendation.");
+  sections.push("Be specific and concrete; vague or overly brief responses may be excluded from consensus.");
+
+  return sections.join("\n");
 }
 
 export async function runParticipantInvocation(invocation: ParticipantInvocation): Promise<ParticipantExecutionResult> {

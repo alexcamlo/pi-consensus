@@ -9,6 +9,8 @@ import {
   DEFAULT_PARTICIPANT_CONCURRENCY,
   DEFAULT_PARTICIPANT_MAX_RETRIES,
   loadConsensusConfig,
+  STANCE_VALUES,
+  FOCUS_VALUES,
 } from "../src/config.ts";
 
 test("loadConsensusConfig preserves optional contextWindow metadata for object-form model refs", () => {
@@ -270,6 +272,102 @@ test("loadConsensusConfig rejects invalid synthesisMaxRetries values", () => {
     (error) => {
       assert.ok(error instanceof ConsensusConfigError);
       assert.match(error.message, /synthesisMaxRetries/);
+      return true;
+    },
+  );
+});
+
+test("loadConsensusConfig preserves optional stance and focus metadata for participant models", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-stance-focus-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4-5", stance: "for", focus: "security" },
+        { provider: "openai", id: "gpt-5", stance: "against" },
+        { provider: "google", id: "gemini-2.5-pro", stance: "neutral", focus: "performance" },
+      ],
+    }),
+  );
+
+  const config = loadConsensusConfig({
+    cwd: projectDir,
+    availableModels: [
+      { provider: "anthropic", id: "claude-sonnet-4-5" },
+      { provider: "openai", id: "gpt-5" },
+      { provider: "google", id: "gemini-2.5-pro" },
+    ],
+    currentModel: { provider: "openai", id: "gpt-5" },
+  });
+
+  assert.equal(config.models[0].stance, "for");
+  assert.equal(config.models[0].focus, "security");
+  assert.equal(config.models[1].stance, "against");
+  assert.equal(config.models[1].focus, undefined);
+  assert.equal(config.models[2].stance, "neutral");
+  assert.equal(config.models[2].focus, "performance");
+});
+
+test("loadConsensusConfig rejects invalid stance values", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-invalid-stance-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4-5", stance: "supportive" },
+        "openai/gpt-5",
+      ],
+    }),
+  );
+
+  assert.throws(
+    () =>
+      loadConsensusConfig({
+        cwd: projectDir,
+        availableModels: [
+          { provider: "anthropic", id: "claude-sonnet-4-5" },
+          { provider: "openai", id: "gpt-5" },
+        ],
+        currentModel: { provider: "openai", id: "gpt-5" },
+      }),
+    (error) => {
+      assert.ok(error instanceof ConsensusConfigError);
+      assert.match(error.message, /stance/);
+      assert.match(error.message, new RegExp(STANCE_VALUES.join("|")));
+      return true;
+    },
+  );
+});
+
+test("loadConsensusConfig rejects invalid focus values", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-invalid-focus-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4-5", focus: "scalability" },
+        "openai/gpt-5",
+      ],
+    }),
+  );
+
+  assert.throws(
+    () =>
+      loadConsensusConfig({
+        cwd: projectDir,
+        availableModels: [
+          { provider: "anthropic", id: "claude-sonnet-4-5" },
+          { provider: "openai", id: "gpt-5" },
+        ],
+        currentModel: { provider: "openai", id: "gpt-5" },
+      }),
+    (error) => {
+      assert.ok(error instanceof ConsensusConfigError);
+      assert.match(error.message, /focus/);
+      assert.match(error.message, new RegExp(FOCUS_VALUES.join("|").replace(/\s/g, "\\\\s")));
       return true;
     },
   );

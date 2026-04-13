@@ -14,7 +14,7 @@ type ModelLike = {
   id: string;
 };
 
-type RawModelRef = string | { provider?: unknown; id?: unknown; contextWindow?: unknown };
+type RawModelRef = string | { provider?: unknown; id?: unknown; contextWindow?: unknown; stance?: unknown; focus?: unknown };
 
 export const DEFAULT_PARTICIPANT_CONCURRENCY = 3;
 export const DEFAULT_PARTICIPANT_MAX_RETRIES = 1;
@@ -32,10 +32,18 @@ type RawConsensusConfig = {
   synthesisMaxRetries?: unknown;
 };
 
+export const STANCE_VALUES = ["for", "against", "neutral"] as const;
+export const FOCUS_VALUES = ["security", "performance", "maintainability", "implementation speed", "user value"] as const;
+
+export type Stance = (typeof STANCE_VALUES)[number];
+export type Focus = (typeof FOCUS_VALUES)[number];
+
 export type ConsensusModelRef = {
   provider: string;
   id: string;
   contextWindow?: number;
+  stance?: Stance;
+  focus?: Focus;
 };
 
 export type ConsensusConfig = {
@@ -239,25 +247,45 @@ function normalizeModelRef(value: unknown, fieldName: string): ConsensusModelRef
     const parts = value.split("/");
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
       throw new ConsensusConfigError(
-        `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow? } objects.`,
+        `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow?, stance?, focus? } objects.`,
       );
     }
     return { provider: parts[0], id: parts[1] };
   }
 
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    const model = value as RawModelRef & { provider?: unknown; id?: unknown; contextWindow?: unknown };
+    const model = value as RawModelRef & { provider?: unknown; id?: unknown; contextWindow?: unknown; stance?: unknown; focus?: unknown };
     if (typeof model.provider === "string" && typeof model.id === "string" && model.provider && model.id) {
       return {
         provider: model.provider,
         id: model.id,
         ...(model.contextWindow === undefined ? {} : { contextWindow: normalizeContextWindow(model.contextWindow, fieldName) }),
+        ...(model.stance === undefined ? {} : { stance: normalizeStance(model.stance, fieldName) }),
+        ...(model.focus === undefined ? {} : { focus: normalizeFocus(model.focus, fieldName) }),
       };
     }
   }
 
   throw new ConsensusConfigError(
-    `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow? } objects.`,
+    `Consensus config field "${fieldName}" must use "provider/id" strings or { provider, id, contextWindow?, stance?, focus? } objects.`,
+  );
+}
+
+function normalizeStance(value: unknown, fieldName: string): Stance {
+  if (typeof value === "string" && STANCE_VALUES.includes(value as Stance)) {
+    return value as Stance;
+  }
+  throw new ConsensusConfigError(
+    `Consensus config field "${fieldName}.stance" must be one of: ${STANCE_VALUES.join(", ")}.`,
+  );
+}
+
+function normalizeFocus(value: unknown, fieldName: string): Focus {
+  if (typeof value === "string" && FOCUS_VALUES.includes(value as Focus)) {
+    return value as Focus;
+  }
+  throw new ConsensusConfigError(
+    `Consensus config field "${fieldName}.focus" must be one of: ${FOCUS_VALUES.join(", ")}.`,
   );
 }
 

@@ -80,6 +80,60 @@ test("runParticipantPass executes participant invocations in parallel with subpr
   assert.equal(result.stoppedEarly, false);
 });
 
+test("runParticipantPass passes stance and focus through to participant system prompts", async () => {
+  const invocations: Array<{
+    model: string;
+    systemPrompt: string;
+  }> = [];
+
+  const configWithStanceFocus = {
+    configPath: ".pi/consensus.json",
+    configSource: "project" as const,
+    models: [
+      { provider: "anthropic", id: "claude-sonnet-4-5", stance: "for" as const, focus: "security" as const },
+      { provider: "openai", id: "gpt-5", stance: "against" as const },
+    ],
+    synthesisModel: { provider: "openai", id: "gpt-5" },
+    participantConcurrency: 3,
+    participantMaxRetries: 1,
+    warnings: [],
+  };
+
+  await runParticipantPass(
+    {
+      prompt: "evaluate this authentication approach",
+      cwd: "/tmp/project",
+      config: configWithStanceFocus,
+    },
+    async (invocation) => {
+      invocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        systemPrompt: invocation.systemPrompt,
+      });
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: "Recommendation: proceed. Why: secure design. Risks/tradeoffs: minimal. Confidence: 85%.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  assert.equal(invocations.length, 2);
+
+  // First model has stance "for" and focus "security"
+  assert.match(invocations[0].systemPrompt, /Stance: Supportive/);
+  assert.match(invocations[0].systemPrompt, /Focus: Security/);
+  assert.match(invocations[0].systemPrompt, /Truthfulness guardrail/);
+
+  // Second model has stance "against" only
+  assert.match(invocations[1].systemPrompt, /Stance: Critical/);
+  assert.doesNotMatch(invocations[1].systemPrompt, /Focus:/);
+  assert.match(invocations[1].systemPrompt, /Truthfulness guardrail/);
+});
+
 test("createParticipantSystemPrompt only advertises subprocess-safe participant tools", () => {
   const prompt = createParticipantSystemPrompt();
 
@@ -103,6 +157,67 @@ test("createParticipantSystemPrompt forbids edits and writes", () => {
   const prompt = createParticipantSystemPrompt();
 
   assert.match(prompt, /Never edit or write files/i);
+});
+
+test("createParticipantSystemPrompt includes stance instructions for 'for' stance with truthfulness guardrail", () => {
+  const prompt = createParticipantSystemPrompt("for");
+
+  assert.match(prompt, /Your perspective for this consensus:/);
+  assert.match(prompt, /Stance: Supportive/);
+  assert.match(prompt, /Look for the merits and potential in the proposal/);
+  assert.match(prompt, /You must still reject clearly bad ideas if the evidence is strong against them/);
+  assert.match(prompt, /Truthfulness guardrail: Your stance and focus guide your emphasis, not your honesty/);
+  assert.match(prompt, /If you are supportive but the evidence strongly opposes the proposal, you must reject it/);
+});
+
+test("createParticipantSystemPrompt includes stance instructions for 'against' stance with truthfulness guardrail", () => {
+  const prompt = createParticipantSystemPrompt("against");
+
+  assert.match(prompt, /Stance: Critical/);
+  assert.match(prompt, /Scrutinize the proposal for risks, downsides, and alternatives/);
+  assert.match(prompt, /but acknowledge genuinely good aspects if the evidence supports them/);
+  assert.match(prompt, /If you are critical but the evidence strongly supports the proposal, you must acknowledge this/);
+});
+
+test("createParticipantSystemPrompt includes stance instructions for 'neutral' stance with evidence-based guidance", () => {
+  const prompt = createParticipantSystemPrompt("neutral");
+
+  assert.match(prompt, /Stance: Neutral/);
+  assert.match(prompt, /Evaluate based on the actual weight of evidence/);
+  assert.match(prompt, /Do not artificially balance pros and cons/);
+  assert.match(prompt, /if the evidence clearly favors one side, say so/);
+  assert.match(prompt, /Represent the evidence as it is/);
+});
+
+test("createParticipantSystemPrompt includes focus instructions for each focus dimension", () => {
+  const focuses = ["security", "performance", "maintainability", "implementation speed", "user value"] as const;
+
+  for (const focus of focuses) {
+    const prompt = createParticipantSystemPrompt(undefined, focus);
+
+    assert.match(prompt, /Your perspective for this consensus:/);
+    assert.match(prompt, new RegExp(`Focus: ${focus.charAt(0).toUpperCase() + focus.slice(1)}`));
+    assert.match(prompt, new RegExp(`Prioritize evaluating this proposal from the perspective of ${focus}`));
+    assert.match(prompt, new RegExp(`Consider how the recommendation affects ${focus} above other dimensions`));
+  }
+});
+
+test("createParticipantSystemPrompt includes both stance and focus when both are provided", () => {
+  const prompt = createParticipantSystemPrompt("for", "security");
+
+  assert.match(prompt, /Stance: Supportive/);
+  assert.match(prompt, /Focus: Security/);
+  assert.match(prompt, /Prioritize evaluating this proposal from the perspective of security/);
+  assert.match(prompt, /Truthfulness guardrail: Your stance and focus guide your emphasis, not your honesty/);
+});
+
+test("createParticipantSystemPrompt does not include stance/focus sections when neither is provided", () => {
+  const prompt = createParticipantSystemPrompt();
+
+  assert.doesNotMatch(prompt, /Your perspective for this consensus:/);
+  assert.doesNotMatch(prompt, /Stance:/);
+  assert.doesNotMatch(prompt, /Focus:/);
+  assert.doesNotMatch(prompt, /Truthfulness guardrail/);
 });
 
 test("runParticipantPass captures failed participant executions for downstream handling", async () => {
