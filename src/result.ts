@@ -1,3 +1,4 @@
+import type { Stance, Focus } from "./config.ts";
 import type { ConsensusSynthesisOutput } from "./synthesis.ts";
 
 type ConsensusExecutionSummary = {
@@ -15,6 +16,8 @@ type ParticipantExecutionSummary = {
   exclusionReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
+  stance?: Stance;
+  focus?: Focus;
 };
 
 export type ConsensusExecutionResult = {
@@ -84,7 +87,12 @@ export function createConsensusExecutionResult(
       : [failureMessage ? `- ${failureMessage}` : "- None noted"]),
     "",
     "## Participants",
-    ...participantSummaries.map((participant) => `- ${participant.model} — ${participant.summary}`),
+    ...participantSummaries.map((summary) => {
+      const participant = participants.find((p) => p.model === summary.model);
+      const framing = [participant?.stance && `stance: ${participant.stance}`, participant?.focus && `focus: ${participant.focus}`].filter(Boolean).join(", ");
+      const framingSuffix = framing ? ` (${framing})` : "";
+      return `- ${summary.model}${framingSuffix} — ${summary.summary}`;
+    }),
     "",
     "## Excluded",
     ...(synthesis?.excludedParticipants.length
@@ -129,7 +137,8 @@ export function createConsensusExecutionResult(
 }
 
 function renderParticipantSummary(participant: ParticipantExecutionSummary) {
-  const headline = `### ${participant.model} — ${participant.status}`;
+  const framing = [participant.stance && `stance: ${participant.stance}`, participant.focus && `focus: ${participant.focus}`].filter(Boolean).join(", ");
+  const headline = `### ${participant.model} — ${participant.status}${framing ? ` (${framing})` : ""}`;
 
   if (participant.status === "failed") {
     return [

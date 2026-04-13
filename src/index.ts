@@ -416,7 +416,7 @@ function toConsensusSummary(config: ResolvedConsensusConfig) {
 }
 
 function toParticipantSummary(participant: {
-  model: { provider: string; id: string };
+  model: { provider: string; id: string; stance?: "for" | "against" | "neutral"; focus?: "security" | "performance" | "maintainability" | "implementation speed" | "user value" };
   status: "usable" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
@@ -432,5 +432,7 @@ function toParticipantSummary(participant: {
     exclusionReason: participant.exclusionReason,
     inspectedRepo: participant.inspectedRepo,
     toolNamesUsed: participant.toolNamesUsed,
+    stance: participant.model.stance,
+    focus: participant.model.focus,
   };
 }

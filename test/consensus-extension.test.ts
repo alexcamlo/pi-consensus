@@ -699,6 +699,121 @@ test("consensus command warns when prompt is missing", async () => {
   ]);
 });
 
+test("createConsensusExecutionResult renders participant stance and focus in output", () => {
+  const result = createConsensusExecutionResult(
+    "evaluate authentication approach",
+    {
+      configPath: ".pi/consensus.json",
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
+      synthesisModel: "openai/gpt-5",
+      warnings: [],
+    },
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        status: "usable",
+        output: "Use JWT tokens.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+        stance: "for",
+        focus: "security",
+      },
+      {
+        model: "openai/gpt-5",
+        status: "usable",
+        output: "Consider session cookies.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+        stance: "against",
+      },
+      {
+        model: "google/gemini-2.5-pro",
+        status: "excluded",
+        output: "",
+        exclusionReason: "empty response",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+        stance: "neutral",
+        focus: "performance",
+      },
+    ],
+    undefined,
+    {
+      consensusAnswer: "Use JWT with proper expiration.",
+      overallAgreementPercent: 60,
+      overallDisagreementPercent: 20,
+      overallUnclearPercent: 20,
+      confidencePercent: 75,
+      confidenceLabel: "medium",
+      agreedPoints: [{ point: "Use secure tokens", supportPercent: 100, supportingParticipants: 2, totalParticipants: 2 }],
+      disagreements: [{ point: "Implementation details", summary: "Differ on cookie vs JWT" }],
+      participants: [
+        { model: "anthropic/claude-sonnet-4-5", summary: "Recommended JWT" },
+        { model: "openai/gpt-5", summary: "Suggested alternatives" },
+      ],
+      excludedParticipants: [{ model: "google/gemini-2.5-pro", reason: "empty response" }],
+    },
+    "full",
+  );
+
+  // Verify stance and focus appear in Participants section
+  assert.match(result.text, /## Participants/);
+  assert.match(result.text, /anthropic\/claude-sonnet-4-5 \(stance: for, focus: security\) — Recommended JWT/);
+  assert.match(result.text, /openai\/gpt-5 \(stance: against\) — Suggested alternatives/);
+
+  // Verify excluded participant with stance/focus shown
+  assert.match(result.text, /## Excluded/);
+  assert.match(result.text, /google\/gemini-2\.5-pro — empty response/);
+
+  // Verify debug section shows stance/focus
+  assert.match(result.text, /## Debug participant outputs/);
+  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable \(stance: for, focus: security\)/);
+  assert.match(result.text, /### openai\/gpt-5 — usable \(stance: against\)/);
+  assert.match(result.text, /### google\/gemini-2\.5-pro — excluded \(stance: neutral, focus: performance\)/);
+
+  // Verify details include stance/focus
+  assert.equal(result.details.participants[0].stance, "for");
+  assert.equal(result.details.participants[0].focus, "security");
+  assert.equal(result.details.participants[1].stance, "against");
+  assert.equal(result.details.participants[1].focus, undefined);
+  assert.equal(result.details.participants[2].stance, "neutral");
+  assert.equal(result.details.participants[2].focus, "performance");
+});
+
+test("createConsensusExecutionResult handles participants without stance or focus", () => {
+  const result = createConsensusExecutionResult(
+    "simple query",
+    {
+      configPath: ".pi/consensus.json",
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisModel: "openai/gpt-5",
+      warnings: [],
+    },
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        status: "usable",
+        output: "Answer",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+      {
+        model: "openai/gpt-5",
+        status: "usable",
+        output: "Answer",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      },
+    ],
+  );
+
+  // Verify no stance/focus framing when not provided
+  assert.match(result.text, /## Participants/);
+  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — usable/);
+  assert.doesNotMatch(result.text, /## Participants[\s\S]*anthropic\/claude-sonnet-4-5.*stance:/);
+  assert.doesNotMatch(result.text, /## Participants[\s\S]*openai\/gpt-5.*focus:/);
+});
+
 function createExtensionHarness() {
   let registeredCommand:
     | { description?: string; handler: (args: string, ctx: ReturnType<typeof createCommandContext>) => Promise<void> }
