@@ -275,7 +275,13 @@ export function createParticipantSystemPrompt() {
     "If the user's request depends on repository context, inspect the relevant files before answering.",
     `You may only use these tools: ${SUBPROCESS_SAFE_PARTICIPANT_TOOLS.join(", ")}.`,
     "Never edit or write files.",
-    "Structure your answer with: recommendation, why, risks/tradeoffs, and confidence.",
+    "Your response must include all of the following sections:",
+    "- Recommendation: A clear, actionable recommendation that answers the user's prompt.",
+    "- Why: Rationale explaining your reasoning and how you reached this recommendation.",
+    "- Risks/tradeoffs: Potential downsides, risks, or tradeoffs of your recommendation.",
+    "- Confidence: Your confidence level (e.g., high, medium, low) with a brief justification.",
+    "- Repo evidence: When relevant, cite specific files, patterns, or evidence from the repository that support your recommendation.",
+    "Be specific and concrete; vague or overly brief responses may be excluded from consensus.",
   ].join(" ");
 }
 

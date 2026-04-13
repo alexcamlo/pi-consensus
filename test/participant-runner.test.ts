@@ -87,6 +87,24 @@ test("createParticipantSystemPrompt only advertises subprocess-safe participant 
   assert.doesNotMatch(prompt, /multi_grep/);
 });
 
+test("createParticipantSystemPrompt requires structured response with all required sections", () => {
+  const prompt = createParticipantSystemPrompt();
+
+  assert.match(prompt, /Your response must include all of the following sections/i);
+  assert.match(prompt, /Recommendation:.*clear, actionable recommendation/i);
+  assert.match(prompt, /Why:.*Rationale explaining your reasoning/i);
+  assert.match(prompt, /Risks\/tradeoffs:.*Potential downsides/i);
+  assert.match(prompt, /Confidence:.*confidence level/i);
+  assert.match(prompt, /Repo evidence:.*cite specific files/i);
+  assert.match(prompt, /vague or overly brief responses may be excluded/i);
+});
+
+test("createParticipantSystemPrompt forbids edits and writes", () => {
+  const prompt = createParticipantSystemPrompt();
+
+  assert.match(prompt, /Never edit or write files/i);
+});
+
 test("runParticipantPass captures failed participant executions for downstream handling", async () => {
   const result = await runParticipantPass(
     {
