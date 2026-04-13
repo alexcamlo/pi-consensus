@@ -5,6 +5,7 @@ import {
   createParticipantSystemPrompt,
   EARLY_STOP_FAILURE_REASON,
   filterParticipantOutputs,
+  looksLikeNonEvaluativeResponse,
   runParticipantPass,
 } from "../src/participants.ts";
 
@@ -573,4 +574,181 @@ test("runParticipantPass exhausts retries and returns last failure for persisten
   assert.equal(attemptCount, 4, "should exhaust retries for both participants");
   assert.equal(result.participants[0]?.status, "failed");
   assert.equal(result.participants[1]?.status, "failed");
+});
+
+test("looksLikeNonEvaluativeResponse identifies responses asking for more context", () => {
+  assert.equal(looksLikeNonEvaluativeResponse("I need more information to evaluate this."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("I cannot evaluate without more context about the codebase."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("There is insufficient information to provide a recommendation."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("I would need to inspect more of the codebase to answer this."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("This depends on details not provided in the prompt."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("Unable to provide a recommendation without seeing the implementation."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("More information is needed to make an evaluation."), true);
+  assert.equal(looksLikeNonEvaluativeResponse("I need more context to evaluate for this proposal."), true);
+});
+
+test("looksLikeNonEvaluativeResponse does not flag valid evaluative responses", () => {
+  assert.equal(looksLikeNonEvaluativeResponse("Recommendation: proceed with the refactor. Why: it improves maintainability."), false);
+  assert.equal(looksLikeNonEvaluativeResponse("I recommend against this approach due to security concerns."), false);
+  assert.equal(looksLikeNonEvaluativeResponse("After reviewing the code, I believe we should implement this feature."), false);
+  assert.equal(looksLikeNonEvaluativeResponse("The risks outweigh the benefits here. I recommend declining."), false);
+});
+
+test("createParticipantSystemPrompt includes retry instructions when isRetry is true", () => {
+  const standardPrompt = createParticipantSystemPrompt();
+  const retryPrompt = createParticipantSystemPrompt(undefined, undefined, true);
+
+  assert.doesNotMatch(standardPrompt, /RETRY INSTRUCTIONS/i);
+  assert.match(retryPrompt, /RETRY INSTRUCTIONS/i);
+  assert.match(retryPrompt, /inspect the repository files using the available read-only tools/i);
+  assert.match(retryPrompt, /provide your best recommendation based on the codebase evidence/i);
+  assert.match(retryPrompt, /Do NOT ask for more information/i);
+  assert.match(retryPrompt, /still make a recommendation/i);
+});
+
+test("filterParticipantOutputs excludes non-evaluative responses after retry", () => {
+  const filtered = filterParticipantOutputs([
+    {
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+      status: "completed",
+      output: "Recommendation: update src/index.ts. Why: it centralizes dispatch.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    },
+    {
+      model: { provider: "openai", id: "gpt-5" },
+      status: "completed",
+      output: "I cannot evaluate without more context about the requirements.",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+      retried: true,
+      retryReason: "non-evaluative response",
+    },
+  ]);
+
+  assert.equal(filtered.usable.length, 1);
+  assert.equal(filtered.excluded.length, 1);
+  assert.equal(filtered.excluded[0]?.exclusionReason, "non-evaluative response after retry");
+  assert.equal(filtered.excluded[0]?.retried, true);
+  assert.equal(filtered.excluded[0]?.retryReason, "non-evaluative response");
+});
+
+test("filterParticipantOutputs excludes non-evaluative responses that were not retried", () => {
+  const filtered = filterParticipantOutputs([
+    {
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+      status: "completed",
+      output: "Recommendation: proceed. Why: clear benefits.",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+    {
+      model: { provider: "openai", id: "gpt-5" },
+      status: "completed",
+      output: "I would need more information to make a proper evaluation.",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+  ]);
+
+  assert.equal(filtered.usable.length, 1);
+  assert.equal(filtered.excluded.length, 1);
+  assert.equal(filtered.excluded[0]?.exclusionReason, "non-evaluative response asking for more context");
+});
+
+test("runParticipantPass retries weak non-evaluative responses once with stricter prompt", async () => {
+  let attemptCount = 0;
+  const configWithRetry = {
+    configPath: ".pi/consensus.json",
+    configSource: "project" as const,
+    models: [{ provider: "openai", id: "gpt-5" }],
+    synthesisModel: { provider: "openai", id: "gpt-5" },
+    participantConcurrency: 3,
+    participantMaxRetries: 1,
+    warnings: [],
+  };
+
+  const result = await runParticipantPass(
+    {
+      prompt: "evaluate this proposal",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+    },
+    async (invocation) => {
+      attemptCount++;
+
+      // First attempt: non-evaluative response
+      if (attemptCount === 1) {
+        // Verify first attempt uses standard prompt
+        assert.doesNotMatch(invocation.systemPrompt, /RETRY INSTRUCTIONS/i);
+        return {
+          model: invocation.model,
+          status: "completed" as const,
+          output: "I need more information to evaluate this properly.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
+      }
+
+      // Retry attempt: verify stricter prompt and return usable response
+      assert.match(invocation.systemPrompt, /RETRY INSTRUCTIONS/i);
+      return {
+        model: invocation.model,
+        status: "completed" as const,
+        output: "Recommendation: proceed. Why: benefits outweigh risks.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read", "find"],
+      };
+    },
+  );
+
+  // Should have made 2 attempts (first + retry)
+  assert.equal(attemptCount, 2, "should retry non-evaluative response once");
+  assert.equal(result.participants[0]?.status, "completed");
+  assert.equal(result.participants[0]?.retried, true);
+  assert.equal(result.participants[0]?.retryReason, "non-evaluative response");
+});
+
+test("runParticipantPass excludes participant when retry still produces non-evaluative response", async () => {
+  let attemptCount = 0;
+  const configWithRetry = {
+    configPath: ".pi/consensus.json",
+    configSource: "project" as const,
+    models: [{ provider: "openai", id: "gpt-5" }],
+    synthesisModel: { provider: "openai", id: "gpt-5" },
+    participantConcurrency: 3,
+    participantMaxRetries: 1,
+    warnings: [],
+  };
+
+  const result = await runParticipantPass(
+    {
+      prompt: "evaluate this proposal",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+    },
+    async (invocation) => {
+      attemptCount++;
+
+      // Both attempts return non-evaluative responses
+      return {
+        model: invocation.model,
+        status: "completed" as const,
+        output: "I cannot evaluate without more context about the requirements.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  // Should have made 2 attempts (first + retry)
+  assert.equal(attemptCount, 2, "should attempt retry even when it fails");
+  assert.equal(result.participants[0]?.status, "completed");
+  assert.equal(result.participants[0]?.retried, true);
+
+  // Verify filtering excludes the retried non-evaluative response
+  const filtered = filterParticipantOutputs(result.participants);
+  assert.equal(filtered.usable.length, 0);
+  assert.equal(filtered.excluded.length, 1);
+  assert.equal(filtered.excluded[0]?.exclusionReason, "non-evaluative response after retry");
 });

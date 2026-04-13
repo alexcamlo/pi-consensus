@@ -26,6 +26,8 @@ export type ParticipantExecutionResult = {
   failureReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
+  retried?: boolean;
+  retryReason?: string;
 };
 
 export type ParticipantInvocationExecutor = (
@@ -57,6 +59,8 @@ export type FilteredParticipantResult = {
   exclusionReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
+  retried?: boolean;
+  retryReason?: string;
 };
 
 export type UsableParticipantResult = FilteredParticipantResult & { status: "usable"; output: string };
@@ -93,8 +97,33 @@ const TRANSIENT_FAILURE_PATTERNS = [
   /exited with code \d+.*\n?.*(?:no assistant output|empty)/i,
 ] as const;
 
+// Patterns that indicate a response is asking for more context instead of evaluating
+const NON_EVALUATIVE_PATTERNS = [
+  /need more information/i,
+  /need(s)? more context/i,
+  /cannot evaluate without more context/i,
+  /can't evaluate without more context/i,
+  /insufficient information/i,
+  /insufficient context/i,
+  /would need to inspect more of the codebase/i,
+  /would need to see more of the codebase/i,
+  /depends on details not provided/i,
+  /missing (the )?necessary (details|context|information)/i,
+  /unable to (provide a recommendation|make a recommendation|evaluate)/i,
+  /cannot (provide a recommendation|make a recommendation|evaluate) without/i,
+  /more information (would be|is) needed/i,
+  /request for more information/i,
+  /requires more context/i,
+  /not enough (information|context|details)/i,
+] as const;
+
 export function isTransientFailure(failureReason: string): boolean {
   return TRANSIENT_FAILURE_PATTERNS.some((pattern) => pattern.test(failureReason));
+}
+
+export function looksLikeNonEvaluativeResponse(output: string): boolean {
+  const normalized = output.replace(/\s+/g, " ").trim();
+  return NON_EVALUATIVE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export async function runParticipantPass(
@@ -176,21 +205,54 @@ export async function runParticipantPass(
         return;
       }
 
-      const invocation: ParticipantInvocation = {
+      const baseInvocation = {
         model,
         cwd,
         prompt,
-        systemPrompt: createParticipantSystemPrompt(model.stance, model.focus),
-        allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS],
+        allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS] as string[],
         thinking: config.participantThinking,
         timeoutMs: config.participantTimeoutMs,
         abortSignal: abortControllers[index].signal,
       };
 
-      const result = await executeWithRetry(invocation);
-      participants[index] = result;
-      if (classifyParticipantOutput(result).status === "usable") {
-        usableCount += 1;
+      // First attempt with standard prompt
+      const firstInvocation: ParticipantInvocation = {
+        ...baseInvocation,
+        systemPrompt: createParticipantSystemPrompt(model.stance, model.focus, false),
+      };
+
+      const firstResult = await executeWithRetry(firstInvocation);
+
+      // Check if we got a non-evaluative response and should retry
+      if (
+        firstResult.status === "completed" &&
+        firstResult.output &&
+        looksLikeNonEvaluativeResponse(firstResult.output)
+      ) {
+        // Retry once with stricter prompt
+        const retryInvocation: ParticipantInvocation = {
+          ...baseInvocation,
+          systemPrompt: createParticipantSystemPrompt(model.stance, model.focus, true),
+        };
+
+        const retryResult = await executeWithRetry(retryInvocation);
+
+        // Mark the retry result with metadata
+        const resultWithRetryInfo: ParticipantExecutionResult = {
+          ...retryResult,
+          retried: true,
+          retryReason: "non-evaluative response",
+        };
+
+        participants[index] = resultWithRetryInfo;
+        if (classifyParticipantOutput(retryResult).status === "usable") {
+          usableCount += 1;
+        }
+      } else {
+        participants[index] = firstResult;
+        if (classifyParticipantOutput(firstResult).status === "usable") {
+          usableCount += 1;
+        }
       }
     } catch (error) {
       participants[index] = {
@@ -268,7 +330,7 @@ export function filterParticipantOutputs(
   };
 }
 
-export function createParticipantSystemPrompt(stance?: Stance, focus?: Focus) {
+export function createParticipantSystemPrompt(stance?: Stance, focus?: Focus, isRetry = false) {
   const sections: string[] = [
     "You are participating in a read-only first-pass consensus run.",
     "Answer the user's prompt directly and choose one primary recommendation.",
@@ -276,6 +338,17 @@ export function createParticipantSystemPrompt(stance?: Stance, focus?: Focus) {
     `You may only use these tools: ${SUBPROCESS_SAFE_PARTICIPANT_TOOLS.join(", ")}.`,
     "Never edit or write files.",
   ];
+
+  // Add strict retry instructions for weak/non-evaluative responses
+  if (isRetry) {
+    sections.push("");
+    sections.push("RETRY INSTRUCTIONS: Your previous response did not provide a clear evaluation. You MUST:");
+    sections.push("- Inspect the repository files using the available read-only tools before answering");
+    sections.push("- Provide your best recommendation based on the codebase evidence you can gather");
+    sections.push("- If uncertainty remains, state your assumptions clearly, but still make a recommendation");
+    sections.push("- Do NOT ask for more information or claim you cannot evaluate");
+    sections.push("- Your response MUST include all required sections with specific, concrete content");
+  }
 
   // Add stance/focus framing if provided
   if (stance || focus) {
@@ -529,6 +602,19 @@ function classifyParticipantOutput(participant: ParticipantExecutionResult): Fil
       status: "excluded",
       output,
       exclusionReason: "response was too vague to use for consensus",
+    };
+  }
+
+  // Check for non-evaluative responses that ask for more context instead of evaluating
+  // If this was a retry and still produces non-evaluative output, exclude it
+  if (looksLikeNonEvaluativeResponse(output)) {
+    return {
+      ...participant,
+      status: "excluded",
+      output,
+      exclusionReason: participant.retried
+        ? "non-evaluative response after retry"
+        : "non-evaluative response asking for more context",
     };
   }
 

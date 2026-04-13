@@ -512,6 +512,8 @@ function toParticipantSummary(participant: {
   exclusionReason?: string;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
+  retried?: boolean;
+  retryReason?: string;
 }) {
   return {
     model: formatModelRef(participant.model),
@@ -523,5 +525,7 @@ function toParticipantSummary(participant: {
     toolNamesUsed: participant.toolNamesUsed,
     stance: participant.model.stance,
     focus: participant.model.focus,
+    retried: participant.retried,
+    retryReason: participant.retryReason,
   };
 }
