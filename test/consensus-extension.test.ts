@@ -79,7 +79,7 @@ test("consensus command relays through a hidden assistant tool-call message when
         "Use this exact tool argument JSON:",
         JSON.stringify({ prompt: "draft a migration plan" }),
       ].join("\n\n"),
-      details: { prompt: "draft a migration plan" },
+      details: { prompt: "draft a migration plan", stance: undefined, focus: undefined },
       display: false,
     },
     options: { triggerTurn: true },
@@ -694,9 +694,69 @@ test("consensus command warns when prompt is missing", async () => {
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
-      message: "Usage: /consensus <prompt>",
+      message: "Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>",
     },
   ]);
+});
+
+test("consensus command parses --stance and --focus flags", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  await harness.registeredCommand?.handler("--stance for --focus security evaluate auth", commandContext);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message?.details, {
+    prompt: "evaluate auth",
+    stance: "for",
+    focus: "security",
+  });
+});
+
+test("consensus command rejects invalid stance values", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  await harness.registeredCommand?.handler("--stance supportive evaluate auth", commandContext);
+
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "warning",
+      message: 'Invalid stance "supportive". Must be one of: for, against, neutral.',
+    },
+  ]);
+});
+
+test("consensus command rejects invalid focus values", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  await harness.registeredCommand?.handler("--focus scalability evaluate auth", commandContext);
+
+  assert.deepEqual(commandContext.notifications, [
+    {
+      level: "warning",
+      message: 'Invalid focus "scalability". Must be one of: security, performance, maintainability, implementation speed, user value.',
+    },
+  ]);
+});
+
+test("consensus command handles quoted multi-word focus values", async () => {
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext();
+  await harness.registeredCommand?.handler('--stance against --focus "implementation speed" evaluate approach', commandContext);
+
+  assert.equal(harness.sentMessages.length, 1);
+  assert.deepEqual(harness.sentMessages[0]?.message?.details, {
+    prompt: "evaluate approach",
+    stance: "against",
+    focus: "implementation speed",
+  });
 });
 
 test("createConsensusExecutionResult renders participant stance and focus in output", () => {

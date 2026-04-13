@@ -43,19 +43,29 @@ export default function consensusExtension(
     ],
     parameters: Type.Object({
       prompt: Type.String({ description: "The user prompt to evaluate across multiple models." }),
+      stance: Type.Optional(Type.String({ description: "Override stance for all participants: for, against, or neutral." })),
+      focus: Type.Optional(Type.String({ description: "Override focus for all participants: security, performance, maintainability, implementation speed, or user value." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return executeConsensusWorkflow(params.prompt, ctx, dependencies);
+      return executeConsensusWorkflow(params.prompt, ctx, dependencies, {
+        stance: params.stance as "for" | "against" | "neutral" | undefined,
+        focus: params.focus as "security" | "performance" | "maintainability" | "implementation speed" | "user value" | undefined,
+      });
     },
   });
 
   pi.registerCommand(COMMAND_NAME, {
-    description: "Run the pi-consensus workflow for a prompt.",
+    description: "Run the pi-consensus workflow for a prompt. Optional: --stance for|against|neutral --focus security|performance|maintainability|implementation speed|user value",
     handler: async (args, ctx) => {
-      const prompt = args.trim();
+      const parsed = parseConsensusCommandArgs(args.trim());
 
-      if (!prompt) {
-        ctx.ui.notify("Usage: /consensus <prompt>", "warning");
+      if (parsed.error) {
+        ctx.ui.notify(parsed.error, "warning");
+        return;
+      }
+
+      if (!parsed.prompt) {
+        ctx.ui.notify("Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>", "warning");
         return;
       }
 
@@ -63,8 +73,8 @@ export default function consensusExtension(
       pi.sendMessage(
         {
           customType: COMMAND_MESSAGE_TYPE,
-          content: createConsensusRelayInstruction(prompt),
-          details: { prompt },
+          content: createConsensusRelayInstruction(parsed.prompt, parsed.stance, parsed.focus),
+          details: { prompt: parsed.prompt, stance: parsed.stance, focus: parsed.focus },
           display: false,
         },
         options,
@@ -95,6 +105,10 @@ async function executeConsensusWorkflow(
     executeParticipantInvocation?: ParticipantInvocationExecutor;
     executeSynthesisInvocation?: SynthesisInvocationExecutor;
   },
+  overrides?: {
+    stance?: "for" | "against" | "neutral";
+    focus?: "security" | "performance" | "maintainability" | "implementation speed" | "user value";
+  },
 ) {
   const progress = createConsensusProgressState();
 
@@ -109,10 +123,31 @@ async function executeConsensusWorkflow(
       throw createConsensusStageError("config validation failed", error);
     }
 
+    // Apply command-level overrides to all participant models
+    if (overrides?.stance || overrides?.focus) {
+      config = {
+        ...config,
+        models: config.models.map((model) => ({
+          ...model,
+          ...(overrides.stance ? { stance: overrides.stance } : {}),
+          ...(overrides.focus ? { focus: overrides.focus } : {}),
+        })),
+      };
+    }
+
     progress.selectedParticipants = config.models.map(formatModelRef);
     progress.synthesisModel = formatModelRef(config.synthesisModel);
     for (const warning of config.warnings) {
       ctx.ui.notify(warning, "warning");
+    }
+
+    // Notify about command-level overrides
+    if (overrides?.stance || overrides?.focus) {
+      const overrideParts = [
+        overrides.stance ? `stance: ${overrides.stance}` : "",
+        overrides.focus ? `focus: ${overrides.focus}` : "",
+      ].filter(Boolean);
+      ctx.ui.notify(`Using command-level ${overrideParts.join(", ")} override for this run.`, "info");
     }
 
     for (const model of config.models) {
@@ -224,7 +259,15 @@ async function executeConsensusWorkflow(
   }
 }
 
-function createConsensusRelayInstruction(prompt: string) {
+function createConsensusRelayInstruction(
+  prompt: string,
+  stance?: "for" | "against" | "neutral",
+  focus?: "security" | "performance" | "maintainability" | "implementation speed" | "user value",
+) {
+  const args: { prompt: string; stance?: string; focus?: string } = { prompt };
+  if (stance) args.stance = stance;
+  if (focus) args.focus = focus;
+
   return [
     "Call the consensus tool immediately.",
     "Your entire response must be exactly one consensus tool call.",
@@ -232,7 +275,7 @@ function createConsensusRelayInstruction(prompt: string) {
     "Do not emit assistant prose, summaries, or follow-up text before or after the tool result.",
     "After the tool result is returned, stop.",
     "Use this exact tool argument JSON:",
-    JSON.stringify({ prompt }),
+    JSON.stringify(args),
   ].join("\n\n");
 }
 
@@ -374,6 +417,52 @@ function normalizeConsensusWorkflowError(error: unknown) {
     stage: "workflow failed",
     message,
   };
+}
+
+type ParsedConsensusCommand = {
+  prompt: string;
+  stance?: "for" | "against" | "neutral";
+  focus?: "security" | "performance" | "maintainability" | "implementation speed" | "user value";
+  error?: string;
+};
+
+function parseConsensusCommandArgs(args: string): ParsedConsensusCommand {
+  const STANCE_VALUES = ["for", "against", "neutral"] as const;
+  const FOCUS_VALUES = ["security", "performance", "maintainability", "implementation speed", "user value"] as const;
+
+  let remaining = args.trim();
+  let stance: "for" | "against" | "neutral" | undefined;
+  let focus: "security" | "performance" | "maintainability" | "implementation speed" | "user value" | undefined;
+
+  // Parse --stance flag
+  const stanceMatch = remaining.match(/--stance\s+(\S+)/);
+  if (stanceMatch) {
+    const stanceValue = stanceMatch[1] as typeof STANCE_VALUES[number];
+    if (!STANCE_VALUES.includes(stanceValue)) {
+      return {
+        prompt: "",
+        error: `Invalid stance "${stanceValue}". Must be one of: ${STANCE_VALUES.join(", ")}.`,
+      };
+    }
+    stance = stanceValue;
+    remaining = remaining.replace(stanceMatch[0], "").trim();
+  }
+
+  // Parse --focus flag (handle quoted multi-word values)
+  const focusMatch = remaining.match(/--focus\s+(?:"([^"]+)"|(\S+))/);
+  if (focusMatch) {
+    const focusValue = (focusMatch[1] || focusMatch[2]) as typeof FOCUS_VALUES[number];
+    if (!FOCUS_VALUES.includes(focusValue)) {
+      return {
+        prompt: "",
+        error: `Invalid focus "${focusValue}". Must be one of: ${FOCUS_VALUES.join(", ")}.`,
+      };
+    }
+    focus = focusValue;
+    remaining = remaining.replace(focusMatch[0], "").trim();
+  }
+
+  return { prompt: remaining, stance, focus };
 }
 
 function formatProgressStage(stage: ConsensusProgressState["stage"]) {
