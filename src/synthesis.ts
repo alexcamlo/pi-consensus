@@ -54,6 +54,7 @@ export type SynthesisInvocation = {
 export type SynthesisExecutionResult = {
   model: ConsensusModelRef;
   output: ConsensusSynthesisOutput;
+  rawOutputText?: string;
 };
 
 export type SynthesisInvocationExecutor = (invocation: SynthesisInvocation) => Promise<SynthesisExecutionResult>;
@@ -77,6 +78,7 @@ export async function runConsensusSynthesis(
   hooks: {
     onResponseReceived?: () => void;
     onValidationStarted?: () => void;
+    onRepairStarted?: (validationError: string) => void;
   } = {},
 ): Promise<SynthesisExecutionResult> {
   const invocation: SynthesisInvocation = {
@@ -92,8 +94,43 @@ export async function runConsensusSynthesis(
   const result = await executeSynthesisInvocation(invocation);
   hooks.onResponseReceived?.();
   hooks.onValidationStarted?.();
-  validateSynthesisOutput(result.output);
-  return result;
+
+  try {
+    validateSynthesisOutput(result.output);
+    return result;
+  } catch (error) {
+    if (!(error instanceof InvalidConsensusSynthesisOutputError)) {
+      throw error;
+    }
+
+    hooks.onRepairStarted?.(error.message);
+
+    const repairInvocation: SynthesisInvocation = {
+      ...invocation,
+      prompt: createSynthesisRepairPrompt(result.rawOutputText ?? JSON.stringify(result.output), error.message),
+      systemPrompt: createSynthesisRepairSystemPrompt(),
+    };
+
+    let repairedResult: SynthesisExecutionResult;
+    try {
+      repairedResult = await executeSynthesisInvocation(repairInvocation);
+    } catch (repairError) {
+      throw new InvalidConsensusSynthesisOutputError(
+        `Initial validation error: ${error.message} Synthesis repair also failed: ${formatErrorMessage(repairError)}`,
+      );
+    }
+
+    hooks.onValidationStarted?.();
+
+    try {
+      validateSynthesisOutput(repairedResult.output);
+      return repairedResult;
+    } catch (repairValidationError) {
+      throw new InvalidConsensusSynthesisOutputError(
+        `Initial validation error: ${error.message} Synthesis repair also failed: ${formatErrorMessage(repairValidationError)}`,
+      );
+    }
+  }
 }
 
 export function createSynthesisPrompt(
@@ -149,6 +186,28 @@ export function createSynthesisSystemPrompt(excludedParticipants: Array<Excluded
     "Each participants entry must include model and summary.",
     "Each excludedParticipants entry must include model and reason.",
     ...excludedLines,
+  ].join(" ");
+}
+
+export function createSynthesisRepairPrompt(invalidJson: string, validationError: string) {
+  return [
+    "The previous synthesis JSON failed validation.",
+    "Return corrected JSON only with no markdown fences or commentary.",
+    "Preserve the same overall meaning when possible and fix only what is required for schema validity.",
+    "Validation error:",
+    validationError,
+    "",
+    "Original invalid JSON:",
+    invalidJson,
+  ].join("\n");
+}
+
+export function createSynthesisRepairSystemPrompt() {
+  return [
+    "You are repairing previously generated JSON for a pi consensus workflow.",
+    "Return corrected JSON only with no markdown fences or commentary.",
+    "Use the provided validation error to repair the JSON so it satisfies the same schema.",
+    "Do not omit required fields, do not add commentary, and keep numeric fields as JSON numbers.",
   ].join(" ");
 }
 
@@ -228,8 +287,7 @@ export async function runSynthesisInvocation(invocation: SynthesisInvocation): P
       if (code === 0 && lastAssistantText.trim()) {
         try {
           const output = JSON.parse(lastAssistantText) as ConsensusSynthesisOutput;
-          validateSynthesisOutput(output);
-          resolve({ model: invocation.model, output });
+          resolve({ model: invocation.model, output, rawOutputText: lastAssistantText });
           return;
         } catch (error) {
           reject(error);
@@ -329,6 +387,10 @@ function requireNonNegativeInteger(value: unknown, fieldName: string) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new InvalidConsensusSynthesisOutputError(`Consensus synthesis output field "${fieldName}" must be a non-negative integer.`);
   }
+}
+
+function formatErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | undefined {

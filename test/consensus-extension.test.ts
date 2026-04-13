@@ -535,7 +535,7 @@ test("consensus tool clears progress and reports synthesis failures cleanly", as
   assert.equal(commandContext.widgetCleared, true);
 });
 
-test("consensus tool reports synthesis output validation failures with the synthesis-validation stage", async () => {
+test("consensus tool reports synthesis output validation failures clearly when synthesis repair also fails", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-validation-error-"));
   mkdirSync(join(projectDir, ".pi"), { recursive: true });
   writeFileSync(
@@ -546,6 +546,7 @@ test("consensus tool reports synthesis output validation failures with the synth
   );
 
   const harness = createExtensionHarness();
+  let synthesisCalls = 0;
   consensusExtension(harness.pi as never, {
     executeParticipantInvocation: async (invocation) => ({
       model: invocation.model,
@@ -554,37 +555,44 @@ test("consensus tool reports synthesis output validation failures with the synth
       inspectedRepo: true,
       toolNamesUsed: ["read"],
     }),
-    executeSynthesisInvocation: async (invocation) => ({
-      model: invocation.model,
-      output: {
-        consensusAnswer: "Use the incremental migration plan.",
-        overallAgreementPercent: 70,
-        overallDisagreementPercent: 20,
-        overallUnclearPercent: 10,
-        confidencePercent: 80,
-        confidenceLabel: "medium",
-        agreedPoints: [
-          {
-            point: "Roll out incrementally.",
-            supportPercent: 100,
-            supportingParticipants: -1,
-            totalParticipants: 2,
-          },
-        ],
-        disagreements: [],
-        participants: [
-          {
-            model: "anthropic/claude-sonnet-4-5",
-            summary: "Recommended an incremental rollout.",
-          },
-          {
-            model: "openai/gpt-5",
-            summary: "Also recommended an incremental rollout.",
-          },
-        ],
-        excludedParticipants: [],
-      },
-    }),
+    executeSynthesisInvocation: async (invocation) => {
+      synthesisCalls += 1;
+      return {
+        model: invocation.model,
+        rawOutputText:
+          synthesisCalls === 1
+            ? '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":-1,"totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}'
+            : '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":"two","totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}',
+        output: {
+          consensusAnswer: "Use the incremental migration plan.",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 80,
+          confidenceLabel: "medium",
+          agreedPoints: [
+            {
+              point: "Roll out incrementally.",
+              supportPercent: 100,
+              supportingParticipants: (synthesisCalls === 1 ? -1 : "two") as unknown as number,
+              totalParticipants: 2,
+            },
+          ],
+          disagreements: [],
+          participants: [
+            {
+              model: "anthropic/claude-sonnet-4-5",
+              summary: "Recommended an incremental rollout.",
+            },
+            {
+              model: "openai/gpt-5",
+              summary: "Also recommended an incremental rollout.",
+            },
+          ],
+          excludedParticipants: [],
+        },
+      } as SynthesisExecutionResult;
+    },
   });
 
   const commandContext = createCommandContext(projectDir, [
@@ -602,7 +610,7 @@ test("consensus tool reports synthesis output validation failures with the synth
       undefined,
       commandContext,
     ),
-    /Synthesis output validation failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./,
+    /Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\. Synthesis repair also failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./,
   );
 
   assert.deepEqual(commandContext.notifications, [
@@ -613,7 +621,7 @@ test("consensus tool reports synthesis output validation failures with the synth
     {
       level: "error",
       message:
-        'Synthesis output validation failed: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer.',
+        'Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer. Synthesis repair also failed: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer.',
     },
   ]);
   assert.ok(commandContext.statusUpdates.some((status) => /Validating synthesis output/i.test(status)));
@@ -621,9 +629,10 @@ test("consensus tool reports synthesis output validation failures with the synth
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — failed/.test(line))));
   assert.ok(
     commandContext.widgetUpdates.some((lines) =>
-      lines.some((line) => /Failure — Synthesis output validation failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./.test(line)),
+      lines.some((line) => /Failure — Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\. Synthesis repair also failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./.test(line)),
     ),
   );
+  assert.equal(synthesisCalls, 2);
   assert.equal(commandContext.widgetCleared, true);
 });
 

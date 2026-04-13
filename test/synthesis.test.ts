@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createSynthesisRepairPrompt,
   createSynthesisSystemPrompt,
   runConsensusSynthesis,
   type SynthesisExecutionResult,
@@ -139,7 +140,106 @@ test("createSynthesisSystemPrompt explicitly constrains numeric JSON fields", ()
   assert.match(systemPrompt, /"supportPercent":100,"supportingParticipants":2,"totalParticipants":2/i);
 });
 
-test("runConsensusSynthesis rejects invalid structured output when percentages do not sum to 100", async () => {
+test("runConsensusSynthesis retries once with a repair prompt when validation fails and returns the repaired output", async () => {
+  const invocations: Array<{ prompt: string; systemPrompt: string }> = [];
+
+  const result = await runConsensusSynthesis(
+    {
+      prompt: "draft a migration plan",
+      cwd: "/tmp/project",
+      config,
+      usableParticipants: [
+        {
+          model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+          status: "usable",
+          output: "Recommendation: roll out incrementally.",
+          inspectedRepo: true,
+          toolNamesUsed: ["read"],
+        },
+        {
+          model: { provider: "openai", id: "gpt-5" },
+          status: "usable",
+          output: "Recommendation: use a staged migration.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        },
+      ],
+      excludedParticipants: [],
+    },
+    async (invocation): Promise<SynthesisExecutionResult> => {
+      invocations.push({ prompt: invocation.prompt, systemPrompt: invocation.systemPrompt });
+
+      if (invocations.length === 1) {
+        return {
+          model: invocation.model,
+          rawOutputText:
+            '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":65,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[{"point":"Prefer a staged rollout.","supportPercent":100,"supportingParticipants":"2","totalParticipants":2}],"disagreements":[],"participants":[],"excludedParticipants":[]}',
+          output: {
+            consensusAnswer: "Use an incremental migration.",
+            overallAgreementPercent: 65,
+            overallDisagreementPercent: 25,
+            overallUnclearPercent: 10,
+            confidencePercent: 76,
+            confidenceLabel: "medium",
+            agreedPoints: [
+              {
+                point: "Prefer a staged rollout.",
+                supportPercent: 100,
+                supportingParticipants: "2" as unknown as number,
+                totalParticipants: 2,
+              },
+            ],
+            disagreements: [],
+            participants: [],
+            excludedParticipants: [],
+          },
+        };
+      }
+
+      return {
+        model: invocation.model,
+        rawOutputText:
+          '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":65,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[{"point":"Prefer a staged rollout.","supportPercent":100,"supportingParticipants":2,"totalParticipants":2}],"disagreements":[],"participants":[],"excludedParticipants":[]}',
+        output: {
+          consensusAnswer: "Use an incremental migration.",
+          overallAgreementPercent: 65,
+          overallDisagreementPercent: 25,
+          overallUnclearPercent: 10,
+          confidencePercent: 76,
+          confidenceLabel: "medium",
+          agreedPoints: [
+            {
+              point: "Prefer a staged rollout.",
+              supportPercent: 100,
+              supportingParticipants: 2,
+              totalParticipants: 2,
+            },
+          ],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        },
+      };
+    },
+  );
+
+  assert.equal(result.output.agreedPoints[0]?.supportingParticipants, 2);
+  assert.equal(invocations.length, 2);
+  assert.match(invocations[1]?.prompt ?? "", /Validation error:\nConsensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./);
+  assert.match(invocations[1]?.prompt ?? "", /Original invalid JSON:/);
+  assert.match(invocations[1]?.prompt ?? "", /"supportingParticipants":"2"/);
+  assert.match(invocations[1]?.systemPrompt ?? "", /repairing previously generated JSON/i);
+});
+
+test("createSynthesisRepairPrompt includes the original invalid JSON and exact validation error", () => {
+  const prompt = createSynthesisRepairPrompt('{"supportingParticipants":"2"}', 'Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer.');
+
+  assert.match(prompt, /Validation error:\nConsensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./);
+  assert.match(prompt, /Original invalid JSON:\n\{"supportingParticipants":"2"\}/);
+  assert.match(prompt, /Return corrected JSON only/i);
+});
+
+test("runConsensusSynthesis fails clearly when synthesis repair also fails", async () => {
   await assert.rejects(
     runConsensusSynthesis(
       {
@@ -166,6 +266,7 @@ test("runConsensusSynthesis rejects invalid structured output when percentages d
       },
       async (invocation): Promise<SynthesisExecutionResult> => ({
         model: invocation.model,
+        rawOutputText: '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":60,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[],"disagreements":[],"participants":[],"excludedParticipants":[]}',
         output: {
           consensusAnswer: "Use an incremental migration.",
           overallAgreementPercent: 60,
@@ -180,6 +281,6 @@ test("runConsensusSynthesis rejects invalid structured output when percentages d
         },
       }),
     ),
-    /must sum to 100/,
+    /Synthesis repair also failed: Consensus synthesis output overallAgreementPercent, overallDisagreementPercent, and overallUnclearPercent must sum to 100\./,
   );
 });
