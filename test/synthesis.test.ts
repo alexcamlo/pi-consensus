@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createSynthesisRepairPrompt,
   createSynthesisSystemPrompt,
+  normalizeSynthesisOutput,
   runConsensusSynthesis,
   type SynthesisExecutionResult,
 } from "../src/synthesis.ts";
@@ -170,10 +171,11 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
       invocations.push({ prompt: invocation.prompt, systemPrompt: invocation.systemPrompt });
 
       if (invocations.length === 1) {
+        // Use negative number (can't be normalized) to trigger repair
         return {
           model: invocation.model,
           rawOutputText:
-            '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":65,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[{"point":"Prefer a staged rollout.","supportPercent":100,"supportingParticipants":"2","totalParticipants":2}],"disagreements":[],"participants":[],"excludedParticipants":[]}',
+            '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":65,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[{"point":"Prefer a staged rollout.","supportPercent":100,"supportingParticipants":-1,"totalParticipants":2}],"disagreements":[],"participants":[],"excludedParticipants":[]}',
           output: {
             consensusAnswer: "Use an incremental migration.",
             overallAgreementPercent: 65,
@@ -185,7 +187,7 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
               {
                 point: "Prefer a staged rollout.",
                 supportPercent: 100,
-                supportingParticipants: "2" as unknown as number,
+                supportingParticipants: -1,
                 totalParticipants: 2,
               },
             ],
@@ -196,6 +198,7 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
         };
       }
 
+      // Repair returns valid output
       return {
         model: invocation.model,
         rawOutputText:
@@ -224,10 +227,11 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
   );
 
   assert.equal(result.output.agreedPoints[0]?.supportingParticipants, 2);
+  assert.equal(result.status, "repaired");
   assert.equal(invocations.length, 2);
   assert.match(invocations[1]?.prompt ?? "", /Validation error:\nConsensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./);
   assert.match(invocations[1]?.prompt ?? "", /Original invalid JSON:/);
-  assert.match(invocations[1]?.prompt ?? "", /"supportingParticipants":"2"/);
+  assert.match(invocations[1]?.prompt ?? "", /"supportingParticipants":-1/);
   assert.match(invocations[1]?.systemPrompt ?? "", /repairing previously generated JSON/i);
 });
 
@@ -239,34 +243,39 @@ test("createSynthesisRepairPrompt includes the original invalid JSON and exact v
   assert.match(prompt, /Return corrected JSON only/i);
 });
 
-test("runConsensusSynthesis fails clearly when synthesis repair also fails", async () => {
-  await assert.rejects(
-    runConsensusSynthesis(
-      {
-        prompt: "draft a migration plan",
-        cwd: "/tmp/project",
-        config,
-        usableParticipants: [
-          {
-            model: { provider: "anthropic", id: "claude-sonnet-4-5" },
-            status: "usable",
-            output: "Recommendation: roll out incrementally.",
-            inspectedRepo: true,
-            toolNamesUsed: ["read"],
-          },
-          {
-            model: { provider: "openai", id: "gpt-5" },
-            status: "usable",
-            output: "Recommendation: use a staged migration.",
-            inspectedRepo: false,
-            toolNamesUsed: [],
-          },
-        ],
-        excludedParticipants: [],
-      },
-      async (invocation): Promise<SynthesisExecutionResult> => ({
+test("runConsensusSynthesis returns degraded result when repair also fails", async () => {
+  const invocations: Array<{ prompt: string; systemPrompt: string }> = [];
+  const rawText = "Based on participant outputs, an incremental migration approach is recommended.";
+
+  const result = await runConsensusSynthesis(
+    {
+      prompt: "draft a migration plan",
+      cwd: "/tmp/project",
+      config,
+      usableParticipants: [
+        {
+          model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+          status: "usable",
+          output: "Recommendation: roll out incrementally.",
+          inspectedRepo: true,
+          toolNamesUsed: ["read"],
+        },
+        {
+          model: { provider: "openai", id: "gpt-5" },
+          status: "usable",
+          output: "Recommendation: use a staged migration.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        },
+      ],
+      excludedParticipants: [],
+    },
+    async (invocation): Promise<SynthesisExecutionResult> => {
+      invocations.push({ prompt: invocation.prompt, systemPrompt: invocation.systemPrompt });
+
+      return {
         model: invocation.model,
-        rawOutputText: '{"consensusAnswer":"Use an incremental migration.","overallAgreementPercent":60,"overallDisagreementPercent":25,"overallUnclearPercent":10,"confidencePercent":76,"confidenceLabel":"medium","agreedPoints":[],"disagreements":[],"participants":[],"excludedParticipants":[]}',
+        rawOutputText: rawText,
         output: {
           consensusAnswer: "Use an incremental migration.",
           overallAgreementPercent: 60,
@@ -279,8 +288,161 @@ test("runConsensusSynthesis fails clearly when synthesis repair also fails", asy
           participants: [],
           excludedParticipants: [],
         },
-      }),
-    ),
-    /Synthesis repair also failed: Consensus synthesis output overallAgreementPercent, overallDisagreementPercent, and overallUnclearPercent must sum to 100\./,
+      };
+    },
   );
+
+  // After repair fails, should return degraded result with raw text preserved
+  assert.equal(result.status, "degraded");
+  assert.equal(result.degradedText, rawText);
+  assert.ok(result.rawOutputText);
+  assert.equal(invocations.length, 2); // Initial + repair attempt
+});
+
+test("normalizeSynthesisOutput extracts JSON from markdown code blocks", () => {
+  const rawOutput = `Here's the consensus result:
+
+\`\`\`json
+{
+  "consensusAnswer": "Use an incremental migration.",
+  "overallAgreementPercent": 65,
+  "overallDisagreementPercent": 25,
+  "overallUnclearPercent": 10,
+  "confidencePercent": 76,
+  "confidenceLabel": "medium",
+  "agreedPoints": [{"point":"test","supportPercent":100,"supportingParticipants":2,"totalParticipants":2}],
+  "disagreements": [],
+  "participants": [{"model":"test","summary":"test"}],
+  "excludedParticipants": []
+}
+\`\`\``;
+
+  const normalized = normalizeSynthesisOutput(rawOutput);
+  assert.equal(normalized.status, "extracted");
+  assert.equal(normalized.output?.consensusAnswer, "Use an incremental migration.");
+  assert.equal(normalized.output?.overallAgreementPercent, 65);
+});
+
+test("normalizeSynthesisOutput coerces numeric strings to numbers", () => {
+  const rawOutput = JSON.stringify({
+    consensusAnswer: "Test",
+    overallAgreementPercent: "65",
+    overallDisagreementPercent: "25",
+    overallUnclearPercent: "10",
+    confidencePercent: "76",
+    confidenceLabel: "medium",
+    agreedPoints: [{ point: "test", supportPercent: "100", supportingParticipants: "2", totalParticipants: 2 }],
+    disagreements: [],
+    participants: [],
+    excludedParticipants: [],
+  });
+
+  const normalized = normalizeSynthesisOutput(rawOutput);
+  assert.equal(normalized.status, "normalized");
+  assert.equal(typeof normalized.output?.overallAgreementPercent, "number");
+  assert.equal(normalized.output?.overallAgreementPercent, 65);
+  assert.equal(typeof normalized.output?.agreedPoints[0]?.supportPercent, "number");
+  assert.equal(normalized.output?.agreedPoints[0]?.supportPercent, 100);
+});
+
+test("normalizeSynthesisOutput normalizes missing optional arrays to empty arrays", () => {
+  const rawOutput = JSON.stringify({
+    consensusAnswer: "Test",
+    overallAgreementPercent: 65,
+    overallDisagreementPercent: 25,
+    overallUnclearPercent: 10,
+    confidencePercent: 76,
+    confidenceLabel: "medium",
+    agreedPoints: [],
+    // disagreements omitted
+    participants: [],
+    // excludedParticipants omitted
+  });
+
+  const normalized = normalizeSynthesisOutput(rawOutput);
+  assert.equal(normalized.status, "normalized");
+  assert.deepEqual(normalized.output?.disagreements, []);
+  assert.deepEqual(normalized.output?.excludedParticipants, []);
+});
+
+test("normalizeSynthesisOutput normalizes slight percentage drift", () => {
+  // Sums to 99 instead of 100 (rounding drift)
+  const rawOutput = JSON.stringify({
+    consensusAnswer: "Test",
+    overallAgreementPercent: 65.3,
+    overallDisagreementPercent: 24.8,
+    overallUnclearPercent: 8.9, // Sum = 99
+    confidencePercent: 76,
+    confidenceLabel: "medium",
+    agreedPoints: [],
+    disagreements: [],
+    participants: [],
+    excludedParticipants: [],
+  });
+
+  const normalized = normalizeSynthesisOutput(rawOutput);
+  assert.equal(normalized.status, "normalized");
+  const sum = (normalized.output?.overallAgreementPercent ?? 0) + 
+              (normalized.output?.overallDisagreementPercent ?? 0) + 
+              (normalized.output?.overallUnclearPercent ?? 0);
+  assert.equal(sum, 100);
+});
+
+test("normalizeSynthesisOutput rejects unrecoverable malformed JSON", () => {
+  const rawOutput = "This is just plain text without any JSON structure.";
+
+  const normalized = normalizeSynthesisOutput(rawOutput);
+  assert.equal(normalized.status, "unrecoverable");
+  assert.equal(normalized.output, undefined);
+});
+
+test("degraded synthesis result preserves raw text and indicates degraded status", async () => {
+  const rawText = "Based on participant outputs, an incremental migration is recommended.";
+  
+  const result = await runConsensusSynthesis(
+    {
+      prompt: "draft a migration plan",
+      cwd: "/tmp/project",
+      config,
+      usableParticipants: [
+        {
+          model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+          status: "usable",
+          output: "Recommendation: roll out incrementally.",
+          inspectedRepo: true,
+          toolNamesUsed: ["read"],
+        },
+        {
+          model: { provider: "openai", id: "gpt-5" },
+          status: "usable",
+          output: "Recommendation: use a staged migration.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        },
+      ],
+      excludedParticipants: [],
+    },
+    async (invocation): Promise<SynthesisExecutionResult> => ({
+      model: invocation.model,
+      rawOutputText: rawText,
+      output: {
+        consensusAnswer: "Invalid", // This won't pass validation
+        overallAgreementPercent: 60,
+        overallDisagreementPercent: 25,
+        overallUnclearPercent: 10, // Sum != 100
+        confidencePercent: 76,
+        confidenceLabel: "medium",
+        agreedPoints: [],
+        disagreements: [],
+        participants: [],
+        excludedParticipants: [],
+      },
+    }),
+  );
+
+  assert.equal(result.status, "degraded");
+  assert.equal(result.degradedText, rawText);
+  assert.ok(result.rawOutputText);
+  assert.equal(result.output?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
+  assert.ok(result.output?.consensusAnswer.includes("incremental migration") || result.output?.consensusAnswer === rawText);
 });

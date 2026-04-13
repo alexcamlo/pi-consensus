@@ -30,6 +30,7 @@ export type ConsensusExecutionResult = {
     failedParticipantCount: number;
     failureMessage?: string;
     synthesis?: ConsensusSynthesisOutput;
+    synthesisStatus?: "full" | "repaired" | "degraded";
     nextSteps: string[];
   };
 };
@@ -40,6 +41,7 @@ export function createConsensusExecutionResult(
   participants: ParticipantExecutionSummary[],
   failureMessage?: string,
   synthesis?: ConsensusSynthesisOutput,
+  synthesisStatus?: "full" | "repaired" | "degraded",
 ): ConsensusExecutionResult {
   const usableParticipantCount = participants.filter((participant) => participant.status === "usable").length;
   const excludedParticipantCount = participants.filter((participant) => participant.status === "excluded").length;
@@ -95,6 +97,7 @@ export function createConsensusExecutionResult(
     `- Config: ${config.configPath}`,
     `- Requested participants: ${config.participants.join(", ")}`,
     `- Synthesis model: ${config.synthesisModel}`,
+    synthesisStatus ? `- Synthesis status: ${synthesisStatus}${synthesisStatus === "degraded" ? " (result may be less structured)" : ""}` : "",
     `- Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
     `- Read-only posture: enabled`,
     "",
@@ -115,6 +118,7 @@ export function createConsensusExecutionResult(
       failedParticipantCount,
       failureMessage,
       synthesis,
+      synthesisStatus,
       nextSteps: failureMessage
         ? ["Retry with a prompt that yields at least 2 usable participant outputs.", "Add synthesis once usable outputs are available."]
         : synthesis

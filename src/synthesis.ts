@@ -55,7 +55,15 @@ export type SynthesisExecutionResult = {
   model: ConsensusModelRef;
   output: ConsensusSynthesisOutput;
   rawOutputText?: string;
+  status?: "full" | "repaired" | "degraded";
+  degradedText?: string;
 };
+
+export type NormalizedSynthesisResult =
+  | { status: "full"; output: ConsensusSynthesisOutput }
+  | { status: "extracted"; output: ConsensusSynthesisOutput }
+  | { status: "normalized"; output: ConsensusSynthesisOutput }
+  | { status: "unrecoverable"; output?: undefined };
 
 export type SynthesisInvocationExecutor = (invocation: SynthesisInvocation) => Promise<SynthesisExecutionResult>;
 
@@ -63,6 +71,195 @@ export class InvalidConsensusSynthesisOutputError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidConsensusSynthesisOutputError";
+  }
+}
+
+export function extractJsonFromMixedOutput(text: string): string | undefined {
+  // Look for JSON code blocks first
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // Look for JSON object boundaries
+  const objectMatch = text.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    return objectMatch[0].trim();
+  }
+
+  return undefined;
+}
+
+export function coerceNumericStrings(value: unknown): unknown {
+  if (typeof value === "string") {
+    const num = Number(value);
+    if (!Number.isNaN(num) && String(num) === value.trim()) {
+      return num;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(coerceNumericStrings);
+  }
+
+  if (value && typeof value === "object") {
+    const coerced: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      coerced[key] = coerceNumericStrings(val);
+    }
+    return coerced;
+  }
+
+  return value;
+}
+
+export function normalizeMissingOptionalArrays(output: ConsensusSynthesisOutput): ConsensusSynthesisOutput {
+  return {
+    ...output,
+    disagreements: output.disagreements ?? [],
+    excludedParticipants: output.excludedParticipants ?? [],
+  };
+}
+
+export function normalizePercentageDrift(output: ConsensusSynthesisOutput): ConsensusSynthesisOutput {
+  // Round percentages to integers first (handles float inputs from model)
+  const rounded = {
+    ...output,
+    overallAgreementPercent: Math.round(output.overallAgreementPercent),
+    overallDisagreementPercent: Math.round(output.overallDisagreementPercent),
+    overallUnclearPercent: Math.round(output.overallUnclearPercent),
+  };
+
+  const sum = rounded.overallAgreementPercent + rounded.overallDisagreementPercent + rounded.overallUnclearPercent;
+  const drift = 100 - sum;
+
+  if (drift === 0 || Math.abs(drift) > 2) {
+    // No drift or drift too large to safely normalize
+    return rounded;
+  }
+
+  // Distribute drift to largest percentage (arbitrary but deterministic)
+  const percentages = [
+    { key: "overallAgreementPercent" as const, value: rounded.overallAgreementPercent },
+    { key: "overallDisagreementPercent" as const, value: rounded.overallDisagreementPercent },
+    { key: "overallUnclearPercent" as const, value: rounded.overallUnclearPercent },
+  ];
+  percentages.sort((a, b) => b.value - a.value);
+
+  const adjusted = { ...rounded };
+  adjusted[percentages[0].key] = percentages[0].value + drift;
+
+  return adjusted;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  
+  if (typeof a === "object" && typeof b === "object") {
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    
+    if (aKeys.length !== bKeys.length) return false;
+    
+    for (const key of aKeys) {
+      if (!bKeys.includes(key)) return false;
+      if (!deepEqual(aObj[key], bObj[key])) return false;
+    }
+    return true;
+  }
+  
+  return false;
+}
+
+function roundPercentagesInOutput(output: Record<string, unknown>): Record<string, unknown> {
+  const rounded = { ...output };
+  if (typeof output.overallAgreementPercent === "number") {
+    rounded.overallAgreementPercent = Math.round(output.overallAgreementPercent);
+  }
+  if (typeof output.overallDisagreementPercent === "number") {
+    rounded.overallDisagreementPercent = Math.round(output.overallDisagreementPercent);
+  }
+  if (typeof output.overallUnclearPercent === "number") {
+    rounded.overallUnclearPercent = Math.round(output.overallUnclearPercent);
+  }
+  if (Array.isArray(output.agreedPoints)) {
+    rounded.agreedPoints = output.agreedPoints.map((p: unknown) => {
+      if (!p || typeof p !== "object") return p;
+      const point = p as Record<string, unknown>;
+      return {
+        ...point,
+        supportPercent: typeof point.supportPercent === "number" ? Math.round(point.supportPercent) : point.supportPercent,
+      };
+    });
+  }
+  return rounded;
+}
+
+export function normalizeSynthesisOutput(rawOutput: string): NormalizedSynthesisResult {
+  // Try to extract JSON from mixed content
+  const extractedJson = extractJsonFromMixedOutput(rawOutput);
+  if (!extractedJson) {
+    return { status: "unrecoverable" };
+  }
+
+  // Parse the extracted JSON
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractedJson);
+  } catch {
+    return { status: "unrecoverable" };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return { status: "unrecoverable" };
+  }
+
+  const hadExtraction = extractedJson !== rawOutput.trim();
+
+  // Coerce numeric strings to numbers
+  const coerced = coerceNumericStrings(parsed) as Record<string, unknown>;
+  const hadCoercion = !deepEqual(parsed, coerced);
+
+  // Fill in missing optional arrays
+  let hadArrayNormalization = false;
+  if (coerced.disagreements === undefined) {
+    coerced.disagreements = [];
+    hadArrayNormalization = true;
+  }
+  if (coerced.excludedParticipants === undefined) {
+    coerced.excludedParticipants = [];
+    hadArrayNormalization = true;
+  }
+
+  // Round percentages before drift normalization (handles float inputs from models)
+  const rounded = roundPercentagesInOutput(coerced);
+  const hadRounding = !deepEqual(coerced, rounded);
+
+  // Normalize percentage drift (e.g., 65+25+9=99 -> 66+25+9=100)
+  const driftNormalized = normalizePercentageDrift(rounded as ConsensusSynthesisOutput);
+  const hadDriftNormalization = !deepEqual(rounded, driftNormalized);
+
+  // Try to validate the output
+  try {
+    validateSynthesisOutput(driftNormalized);
+
+    if (hadExtraction) {
+      return { status: "extracted", output: driftNormalized };
+    }
+    if (hadCoercion || hadArrayNormalization || hadRounding || hadDriftNormalization) {
+      return { status: "normalized", output: driftNormalized };
+    }
+    return { status: "full", output: driftNormalized };
+  } catch (error) {
+    // Validation failed - check if we can still return a degraded result
+    if (coerced.consensusAnswer && typeof coerced.consensusAnswer === "string") {
+      return { status: "unrecoverable" };
+    }
+    return { status: "unrecoverable" };
   }
 }
 
@@ -79,6 +276,7 @@ export async function runConsensusSynthesis(
     onResponseReceived?: () => void;
     onValidationStarted?: () => void;
     onRepairStarted?: (validationError: string) => void;
+    onDegraded?: () => void;
   } = {},
 ): Promise<SynthesisExecutionResult> {
   const invocation: SynthesisInvocation = {
@@ -95,42 +293,102 @@ export async function runConsensusSynthesis(
   hooks.onResponseReceived?.();
   hooks.onValidationStarted?.();
 
+  // Try normalization first (handles extraction, coercion, arrays)
+  const normalized = normalizeSynthesisOutput(result.rawOutputText ?? JSON.stringify(result.output));
+  if (normalized.status !== "unrecoverable") {
+    // Map normalization status to synthesis result status
+    // "extracted" and "normalized" indicate successful normalization of initial output
+    const status: "full" | "repaired" | "degraded" =
+      normalized.status === "full" ? "full" : "full";
+    return {
+      model: result.model,
+      output: normalized.output,
+      rawOutputText: result.rawOutputText,
+      status,
+    };
+  }
+
+  // Try validation on the raw output
+  let validationError: InvalidConsensusSynthesisOutputError | undefined;
   try {
     validateSynthesisOutput(result.output);
-    return result;
+    return { ...result, status: "full" };
   } catch (error) {
-    if (!(error instanceof InvalidConsensusSynthesisOutputError)) {
+    if (error instanceof InvalidConsensusSynthesisOutputError) {
+      validationError = error;
+    } else {
       throw error;
     }
-
-    hooks.onRepairStarted?.(error.message);
-
-    const repairInvocation: SynthesisInvocation = {
-      ...invocation,
-      prompt: createSynthesisRepairPrompt(result.rawOutputText ?? JSON.stringify(result.output), error.message),
-      systemPrompt: createSynthesisRepairSystemPrompt(),
-    };
-
-    let repairedResult: SynthesisExecutionResult;
-    try {
-      repairedResult = await executeSynthesisInvocation(repairInvocation);
-    } catch (repairError) {
-      throw new InvalidConsensusSynthesisOutputError(
-        `Initial validation error: ${error.message} Synthesis repair also failed: ${formatErrorMessage(repairError)}`,
-      );
-    }
-
-    hooks.onValidationStarted?.();
-
-    try {
-      validateSynthesisOutput(repairedResult.output);
-      return repairedResult;
-    } catch (repairValidationError) {
-      throw new InvalidConsensusSynthesisOutputError(
-        `Initial validation error: ${error.message} Synthesis repair also failed: ${formatErrorMessage(repairValidationError)}`,
-      );
-    }
   }
+
+  // Attempt repair
+  hooks.onRepairStarted?.(validationError.message);
+
+  const repairInvocation: SynthesisInvocation = {
+    ...invocation,
+    prompt: createSynthesisRepairPrompt(result.rawOutputText ?? JSON.stringify(result.output), validationError.message),
+    systemPrompt: createSynthesisRepairSystemPrompt(),
+  };
+
+  let repairedResult: SynthesisExecutionResult;
+  try {
+    repairedResult = await executeSynthesisInvocation(repairInvocation);
+  } catch (repairError) {
+    // Repair subprocess failed - degrade to raw text if available
+    hooks.onDegraded?.();
+    return createDegradedResult(result.model, result.rawOutputText ?? "Synthesis failed to produce valid output.");
+  }
+
+  hooks.onValidationStarted?.();
+
+  // Try normalization on repaired result
+  const repairedNormalized = normalizeSynthesisOutput(repairedResult.rawOutputText ?? JSON.stringify(repairedResult.output));
+  if (repairedNormalized.status !== "unrecoverable") {
+    return {
+      model: repairedResult.model,
+      output: repairedNormalized.output,
+      rawOutputText: repairedResult.rawOutputText,
+      status: "repaired",
+    };
+  }
+
+  // Try validation on repaired output
+  try {
+    validateSynthesisOutput(repairedResult.output);
+    return { ...repairedResult, status: "repaired" };
+  } catch {
+    // Repair validation failed - degrade gracefully
+    hooks.onDegraded?.();
+    return createDegradedResult(
+      result.model,
+      repairedResult.rawOutputText ?? result.rawOutputText ?? "Synthesis failed to produce valid output.",
+    );
+  }
+}
+
+function createDegradedResult(model: ConsensusModelRef, rawText: string): SynthesisExecutionResult {
+  return {
+    model,
+    status: "degraded",
+    degradedText: rawText,
+    rawOutputText: rawText,
+    output: createFallbackSynthesisOutput(rawText),
+  };
+}
+
+function createFallbackSynthesisOutput(rawText: string): ConsensusSynthesisOutput {
+  return {
+    consensusAnswer: rawText,
+    overallAgreementPercent: 0,
+    overallDisagreementPercent: 0,
+    overallUnclearPercent: 100,
+    confidencePercent: 0,
+    confidenceLabel: "low (degraded mode - synthesis output was malformed)",
+    agreedPoints: [],
+    disagreements: [],
+    participants: [],
+    excludedParticipants: [],
+  };
 }
 
 export function createSynthesisPrompt(

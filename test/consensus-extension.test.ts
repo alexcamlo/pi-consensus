@@ -602,16 +602,18 @@ test("consensus tool reports synthesis output validation failures clearly when s
   commandContext.model = { provider: "openai", id: "gpt-5" };
   commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-validation-error-"));
 
-  await assert.rejects(
-    harness.registeredTool?.execute(
-      "tool-call-synthesis-validation-error",
-      { prompt: "draft a migration plan" },
-      undefined,
-      undefined,
-      commandContext,
-    ),
-    /Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\. Synthesis repair also failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./,
+  const result = await harness.registeredTool?.execute(
+    "tool-call-synthesis-validation-error",
+    { prompt: "draft a migration plan" },
+    undefined,
+    undefined,
+    commandContext,
   );
+
+  // Should return degraded result instead of failing
+  assert.ok(result);
+  assert.equal(result?.details.synthesis?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
+  assert.equal(result?.details.status, "synthesis-complete");
 
   assert.deepEqual(commandContext.notifications, [
     {
@@ -619,19 +621,13 @@ test("consensus tool reports synthesis output validation failures clearly when s
       message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
     },
     {
-      level: "error",
-      message:
-        'Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer. Synthesis repair also failed: Consensus synthesis output field "agreedPoints[].supportingParticipants" must be a non-negative integer.',
+      level: "info",
+      message: "pi-consensus participant pass and synthesis completed.",
     },
   ]);
   assert.ok(commandContext.statusUpdates.some((status) => /Validating synthesis output/i.test(status)));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — failed/.test(line))));
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) =>
-      lines.some((line) => /Failure — Synthesis output validation failed: Initial validation error: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\. Synthesis repair also failed: Consensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./.test(line)),
-    ),
-  );
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — synthesis/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — completed/.test(line))));
   assert.equal(synthesisCalls, 2);
   assert.equal(commandContext.widgetCleared, true);
 });

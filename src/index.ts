@@ -10,7 +10,6 @@ import {
 } from "./participants.ts";
 import { createConsensusExecutionResult } from "./result.ts";
 import {
-  InvalidConsensusSynthesisOutputError,
   runConsensusSynthesis,
   runSynthesisInvocation,
   type SynthesisInvocationExecutor,
@@ -153,6 +152,7 @@ async function executeConsensusWorkflow(
     );
 
     let synthesis;
+    let synthesisStatus: "full" | "repaired" | "degraded" | undefined;
     if (filteredParticipants.failureMessage) {
       progress.synthesis = "skipped";
       updateConsensusProgress(ctx, progress, "Skipping synthesis because the minimum usable participant count was not reached.");
@@ -176,14 +176,19 @@ async function executeConsensusWorkflow(
               progress.synthesis = "validating";
               updateConsensusProgress(ctx, progress, "Validating synthesis output...");
             },
+            onDegraded: () => {
+              progress.synthesis = "completed";
+              updateConsensusProgress(ctx, progress, "Synthesis completed (degraded mode).");
+            },
           },
         );
-        progress.synthesis = "completed";
-        updateConsensusProgress(ctx, progress, "Synthesis completed.");
+        synthesisStatus = synthesis.status;
+        if (synthesis.status !== "degraded") {
+          progress.synthesis = "completed";
+          updateConsensusProgress(ctx, progress, "Synthesis completed.");
+        }
       } catch (error) {
-        throw error instanceof InvalidConsensusSynthesisOutputError
-          ? createConsensusStageError("synthesis output validation failed", error)
-          : createConsensusStageError("synthesis subprocess failed", error);
+        throw createConsensusStageError("synthesis subprocess failed", error);
       }
     }
 
@@ -193,6 +198,7 @@ async function executeConsensusWorkflow(
       filteredParticipants.participants.map(toParticipantSummary),
       filteredParticipants.failureMessage,
       synthesis?.output,
+      synthesisStatus,
     );
 
     if (!filteredParticipants.failureMessage) {
