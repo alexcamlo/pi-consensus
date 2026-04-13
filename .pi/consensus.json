@@ -1,0 +1,19 @@
+{
+  "models": [
+    {
+      "provider": "openrouter",
+      "id": "z-ai/glm-4-32b",
+      "contextWindow": 128000
+    },
+    {
+      "provider": "openrouter",
+      "id": "openai/gpt-oss-120b:free",
+      "contextWindow": 131072
+    },
+    {
+      "provider": "openrouter",
+      "id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "contextWindow": 262144
+    }
+  ]
+}
