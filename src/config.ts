@@ -16,6 +16,9 @@ type ModelLike = {
 
 type RawModelRef = string | { provider?: unknown; id?: unknown; contextWindow?: unknown };
 
+export const DEFAULT_PARTICIPANT_CONCURRENCY = 3;
+export const DEFAULT_PARTICIPANT_MAX_RETRIES = 1;
+
 type RawConsensusConfig = {
   models?: unknown;
   synthesisModel?: unknown;
@@ -23,6 +26,8 @@ type RawConsensusConfig = {
   synthesisThinking?: unknown;
   participantTimeoutMs?: unknown;
   synthesisTimeoutMs?: unknown;
+  participantConcurrency?: unknown;
+  participantMaxRetries?: unknown;
 };
 
 export type ConsensusModelRef = {
@@ -38,12 +43,16 @@ export type ConsensusConfig = {
   synthesisThinking?: ThinkingLevel;
   participantTimeoutMs?: number;
   synthesisTimeoutMs?: number;
+  participantConcurrency?: number;
+  participantMaxRetries?: number;
 };
 
 export type ResolvedConsensusConfig = Omit<ConsensusConfig, "synthesisModel"> & {
   configPath: string;
   configSource: "project" | "global";
   synthesisModel: ConsensusModelRef;
+  participantConcurrency: number;
+  participantMaxRetries: number;
   warnings: string[];
 };
 
@@ -110,6 +119,8 @@ export function loadConsensusConfig(options: {
   const synthesisThinking = normalizeThinkingLevel(rawConfig.synthesisThinking, "synthesisThinking");
   const participantTimeoutMs = normalizeTimeout(rawConfig.participantTimeoutMs, "participantTimeoutMs");
   const synthesisTimeoutMs = normalizeTimeout(rawConfig.synthesisTimeoutMs, "synthesisTimeoutMs");
+  const participantConcurrency = normalizeConcurrency(rawConfig.participantConcurrency, "participantConcurrency");
+  const participantMaxRetries = normalizeMaxRetries(rawConfig.participantMaxRetries, "participantMaxRetries");
 
   const synthesisModel = resolveSynthesisModel({
     rawSynthesisModel: rawConfig.synthesisModel,
@@ -128,6 +139,8 @@ export function loadConsensusConfig(options: {
     synthesisThinking,
     participantTimeoutMs,
     synthesisTimeoutMs,
+    participantConcurrency,
+    participantMaxRetries,
     warnings,
   };
 }
@@ -272,6 +285,28 @@ function normalizeTimeout(value: unknown, fieldName: string): number | undefined
     return value;
   }
   throw new ConsensusConfigError(`Consensus config field "${fieldName}" must be a positive number of milliseconds.`);
+}
+
+function normalizeConcurrency(value: unknown, fieldName: string): number {
+  if (value === undefined) {
+    return DEFAULT_PARTICIPANT_CONCURRENCY;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_PARTICIPANTS) {
+    return value;
+  }
+  throw new ConsensusConfigError(
+    `Consensus config field "${fieldName}" must be an integer between 1 and ${MAX_PARTICIPANTS}.`,
+  );
+}
+
+function normalizeMaxRetries(value: unknown, fieldName: string): number {
+  if (value === undefined) {
+    return DEFAULT_PARTICIPANT_MAX_RETRIES;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 3) {
+    return value;
+  }
+  throw new ConsensusConfigError(`Consensus config field "${fieldName}" must be an integer between 0 and 3.`);
 }
 
 function isModelAvailable(model: ConsensusModelRef, availableModels: ModelLike[]) {

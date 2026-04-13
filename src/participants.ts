@@ -32,6 +32,17 @@ export type ParticipantInvocationExecutor = (
   invocation: ParticipantInvocation,
 ) => Promise<ParticipantExecutionResult>;
 
+export type ParticipantRetryInfo = {
+  attempt: number;
+  maxRetries: number;
+  isRetry: boolean;
+};
+
+export type ParticipantInvocationExecutorWithRetry = (
+  invocation: ParticipantInvocation,
+  retryInfo: ParticipantRetryInfo,
+) => Promise<ParticipantExecutionResult>;
+
 export type ParticipantPassResult = {
   participants: ParticipantExecutionResult[];
   stoppedEarly: boolean;
@@ -66,6 +77,26 @@ export const MINIMUM_USABLE_PARTICIPANTS = 2;
 export const EARLY_STOP_FAILURE_REASON =
   "participant subprocess cancelled because reaching the minimum 2 usable participants became impossible";
 
+const TRANSIENT_FAILURE_PATTERNS = [
+  /timed out/i,
+  /timeout/i,
+  /etimedout/i,
+  /econnreset/i,
+  /econnrefused/i,
+  /connection refused/i,
+  /socket hang up/i,
+  /network error/i,
+  /transport/i,
+  /temporarily unavailable/i,
+  /rate limit/i,
+  /too many requests/i,
+  /exited with code \d+.*\n?.*(?:no assistant output|empty)/i,
+] as const;
+
+export function isTransientFailure(failureReason: string): boolean {
+  return TRANSIENT_FAILURE_PATTERNS.some((pattern) => pattern.test(failureReason));
+}
+
 export async function runParticipantPass(
   options: {
     prompt: string;
@@ -75,41 +106,76 @@ export async function runParticipantPass(
   executeParticipantInvocation: ParticipantInvocationExecutor = runParticipantInvocation,
 ): Promise<ParticipantPassResult> {
   const { prompt, cwd, config } = options;
+  const concurrency = config.participantConcurrency;
+  const maxRetries = config.participantMaxRetries;
 
   const participants = new Array<ParticipantExecutionResult>(config.models.length);
   const abortControllers = config.models.map(() => new AbortController());
-  const completionPromises: Promise<void>[] = [];
+
   let settledCount = 0;
   let usableCount = 0;
   let stoppedEarly = false;
   let earlyStopReason: string | undefined;
-  let resolved = false;
 
-  await new Promise<void>((resolve) => {
-    const maybeResolve = () => {
-      if (!resolved && settledCount === config.models.length) {
-        resolved = true;
-        resolve();
+  const executeWithRetry = createRetryExecutor(executeParticipantInvocation, maxRetries);
+
+  // Semaphore for bounded concurrency using a simpler slot-based approach
+  let activeCount = 0;
+  const pendingQueue: Array<() => void> = [];
+
+  const acquireSlot = async (): Promise<void> => {
+    if (activeCount < concurrency) {
+      activeCount++;
+      return;
+    }
+    return new Promise((resolve) => pendingQueue.push(resolve));
+  };
+
+  const releaseSlot = (): void => {
+    activeCount--;
+    const next = pendingQueue.shift();
+    if (next) {
+      activeCount++;
+      next();
+    }
+  };
+
+  const maybeStopEarly = () => {
+    const remaining = config.models.length - settledCount;
+    if (stoppedEarly || usableCount + remaining >= MINIMUM_USABLE_PARTICIPANTS) {
+      return false;
+    }
+
+    stoppedEarly = true;
+    earlyStopReason = `Consensus stopped early because only ${usableCount} usable participant output${usableCount === 1 ? "" : "s"} remained and ${remaining} participant run${remaining === 1 ? " was" : "s were"} still in flight, so reaching the minimum ${MINIMUM_USABLE_PARTICIPANTS} usable participants became impossible.`;
+
+    abortControllers.forEach((controller, index) => {
+      if (!participants[index]) {
+        controller.abort(earlyStopReason);
       }
-    };
+    });
 
-    const maybeStopEarly = () => {
-      const remaining = config.models.length - settledCount;
-      if (stoppedEarly || usableCount + remaining >= MINIMUM_USABLE_PARTICIPANTS) {
+    return true;
+  };
+
+  const runParticipant = async (model: ConsensusModelRef, index: number): Promise<void> => {
+    await acquireSlot();
+
+    try {
+      // Check if already aborted before starting
+      if (abortControllers[index].signal.aborted) {
+        participants[index] = {
+          model,
+          status: "failed",
+          failureReason: typeof abortControllers[index].signal.reason === "string"
+            ? abortControllers[index].signal.reason
+            : EARLY_STOP_FAILURE_REASON,
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
         return;
       }
 
-      stoppedEarly = true;
-      earlyStopReason = `Consensus stopped early because only ${usableCount} usable participant output${usableCount === 1 ? "" : "s"} remained and ${remaining} participant run${remaining === 1 ? " was" : "s were"} still in flight, so reaching the minimum ${MINIMUM_USABLE_PARTICIPANTS} usable participants became impossible.`;
-
-      abortControllers.forEach((controller, index) => {
-        if (!participants[index]) {
-          controller.abort(earlyStopReason);
-        }
-      });
-    };
-
-    config.models.forEach((model, index) => {
       const invocation: ParticipantInvocation = {
         model,
         cwd,
@@ -121,34 +187,60 @@ export async function runParticipantPass(
         abortSignal: abortControllers[index].signal,
       };
 
-      const completionPromise = (async () => {
-        try {
-          const result = await executeParticipantInvocation(invocation);
-          participants[index] = result;
-          if (classifyParticipantOutput(result).status === "usable") {
-            usableCount += 1;
-          }
-        } catch (error) {
-          participants[index] = {
-            model,
-            status: "failed",
-            failureReason: error instanceof Error ? error.message : String(error),
-            inspectedRepo: false,
-            toolNamesUsed: [],
-          } satisfies ParticipantExecutionResult;
-        } finally {
-          settledCount += 1;
-          maybeStopEarly();
-          maybeResolve();
-        }
-      })();
+      const result = await executeWithRetry(invocation);
+      participants[index] = result;
+      if (classifyParticipantOutput(result).status === "usable") {
+        usableCount += 1;
+      }
+    } catch (error) {
+      participants[index] = {
+        model,
+        status: "failed",
+        failureReason: error instanceof Error ? error.message : String(error),
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      } satisfies ParticipantExecutionResult;
+    } finally {
+      settledCount += 1;
+      maybeStopEarly();
+      releaseSlot();
+    }
+  };
 
-      completionPromises.push(completionPromise);
-    });
-  });
+  await Promise.all(config.models.map((model, index) => runParticipant(model, index)));
 
-  await Promise.all(completionPromises);
   return { participants, stoppedEarly, earlyStopReason };
+}
+
+function createRetryExecutor(
+  executeParticipantInvocation: ParticipantInvocationExecutor,
+  maxRetries: number,
+): ParticipantInvocationExecutor {
+  return async (invocation: ParticipantInvocation): Promise<ParticipantExecutionResult> => {
+    let lastResult: ParticipantExecutionResult | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const result = await executeParticipantInvocation(invocation);
+
+      // If completed successfully, return immediately
+      if (result.status === "completed") {
+        return result;
+      }
+
+      lastResult = result;
+      const failureReason = result.failureReason ?? "";
+
+      // Only retry transient failures, and only if we haven't exhausted retries
+      if (attempt < maxRetries && isTransientFailure(failureReason)) {
+        continue;
+      }
+
+      // Non-transient failure or exhausted retries
+      break;
+    }
+
+    return lastResult!;
+  };
 }
 
 export function filterParticipantOutputs(

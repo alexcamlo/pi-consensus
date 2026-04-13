@@ -16,6 +16,8 @@ const config = {
     { provider: "openai", id: "gpt-5" },
   ],
   synthesisModel: { provider: "openai", id: "gpt-5" },
+  participantConcurrency: 3,
+  participantMaxRetries: 1,
   warnings: [],
 };
 
@@ -268,4 +270,174 @@ test("filterParticipantOutputs excludes refusal-only and vague answers and fails
     filtered.failureMessage,
     "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
   );
+});
+
+import { isTransientFailure } from "../src/participants.ts";
+
+test("isTransientFailure identifies timeout, transport, and network errors as transient", () => {
+  assert.equal(isTransientFailure("participant subprocess timed out after 30000ms"), true);
+  assert.equal(isTransientFailure("socket hang up"), true);
+  assert.equal(isTransientFailure("ECONNRESET"), true);
+  assert.equal(isTransientFailure("connection refused"), true);
+  assert.equal(isTransientFailure("rate limit exceeded"), true);
+  assert.equal(isTransientFailure("temporarily unavailable"), true);
+  assert.equal(isTransientFailure("network error occurred"), true);
+});
+
+test("isTransientFailure does not identify non-transient errors as transient", () => {
+  assert.equal(isTransientFailure("participant subprocess exited with code 1"), false);
+  assert.equal(isTransientFailure("invalid model configuration"), false);
+  assert.equal(isTransientFailure("authentication failed"), false);
+  assert.equal(isTransientFailure("model not found"), false);
+});
+
+test("runParticipantPass respects bounded concurrency configuration", async () => {
+  const configWithConcurrency1 = {
+    ...config,
+    models: [
+      { provider: "anthropic", id: "claude-sonnet-4-5" },
+      { provider: "openai", id: "gpt-5" },
+      { provider: "google", id: "gemini-2.5-pro" },
+    ],
+    participantConcurrency: 1,
+  };
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const startTimes: number[] = [];
+
+  const result = await runParticipantPass(
+    {
+      prompt: "review code",
+      cwd: "/tmp/project",
+      config: configWithConcurrency1,
+    },
+    async () => {
+      startTimes.push(Date.now());
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      concurrent -= 1;
+      return {
+        model: { provider: "test", id: "model" },
+        status: "completed" as const,
+        output: "Recommendation: proceed. Why: clear benefits.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  assert.equal(maxConcurrent, 1, "max concurrent should be 1 when concurrency is capped at 1");
+  assert.equal(result.participants.length, 3);
+});
+
+test("runParticipantPass retries transient failures once and succeeds on retry", async () => {
+  const attemptsByModel = new Map<string, number>();
+  const configWithRetry = {
+    ...config,
+    participantMaxRetries: 1,
+  };
+
+  const result = await runParticipantPass(
+    {
+      prompt: "review code",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+    },
+    async (invocation) => {
+      const modelKey = `${invocation.model.provider}/${invocation.model.id}`;
+      const currentAttempt = (attemptsByModel.get(modelKey) ?? 0) + 1;
+      attemptsByModel.set(modelKey, currentAttempt);
+
+      // First model: first attempt fails with transient error, retry succeeds
+      if (modelKey === "anthropic/claude-sonnet-4-5" && currentAttempt === 1) {
+        return {
+          model: invocation.model,
+          status: "failed" as const,
+          failureReason: "participant subprocess timed out after 30000ms",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
+      }
+
+      // All other cases succeed
+      return {
+        model: invocation.model,
+        status: "completed" as const,
+        output: "Recommendation: proceed.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  // anthropic model: 2 attempts (1 fail + 1 retry succeed)
+  // openai model: 1 attempt (succeed immediately)
+  assert.equal(attemptsByModel.get("anthropic/claude-sonnet-4-5"), 2, "anthropic model should be retried once");
+  assert.equal(attemptsByModel.get("openai/gpt-5"), 1, "openai model should not need retry");
+  assert.equal(result.participants[0]?.status, "completed");
+  assert.equal(result.participants[1]?.status, "completed");
+});
+
+test("runParticipantPass does not retry non-transient failures", async () => {
+  let attemptCount = 0;
+  const configWithRetry = {
+    ...config,
+    participantMaxRetries: 1,
+  };
+
+  const result = await runParticipantPass(
+    {
+      prompt: "review code",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+    },
+    async (invocation) => {
+      attemptCount++;
+      return {
+        model: invocation.model,
+        status: "failed" as const,
+        failureReason: "participant subprocess exited with code 1",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  assert.equal(attemptCount, 2, "should attempt both participants once each, no retries for non-transient");
+  assert.equal(result.participants[0]?.status, "failed");
+  assert.equal(result.participants[1]?.status, "failed");
+});
+
+test("runParticipantPass exhausts retries and returns last failure for persistent transient errors", async () => {
+  let attemptCount = 0;
+  const configWithRetry = {
+    ...config,
+    participantMaxRetries: 1,
+  };
+
+  const result = await runParticipantPass(
+    {
+      prompt: "review code",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+    },
+    async (invocation) => {
+      attemptCount++;
+      // Always fail with transient error
+      return {
+        model: invocation.model,
+        status: "failed" as const,
+        failureReason: "participant subprocess timed out after 30000ms",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  // 2 participants, each retried once = 4 total attempts
+  assert.equal(attemptCount, 4, "should exhaust retries for both participants");
+  assert.equal(result.participants[0]?.status, "failed");
+  assert.equal(result.participants[1]?.status, "failed");
 });
