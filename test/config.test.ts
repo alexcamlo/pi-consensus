@@ -200,3 +200,77 @@ test("loadConsensusConfig rejects invalid participantMaxRetries values", () => {
     },
   );
 });
+
+test("loadConsensusConfig applies default value for synthesisMaxRetries", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-synthesis-defaults-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const config = loadConsensusConfig({
+    cwd: projectDir,
+    availableModels: [
+      { provider: "anthropic", id: "claude-sonnet-4-5" },
+      { provider: "openai", id: "gpt-5" },
+    ],
+    currentModel: { provider: "openai", id: "gpt-5" },
+  });
+
+  assert.equal(config.synthesisMaxRetries, 1);
+});
+
+test("loadConsensusConfig accepts custom synthesisMaxRetries value", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-synthesis-custom-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisMaxRetries: 0,
+    }),
+  );
+
+  const config = loadConsensusConfig({
+    cwd: projectDir,
+    availableModels: [
+      { provider: "anthropic", id: "claude-sonnet-4-5" },
+      { provider: "openai", id: "gpt-5" },
+    ],
+    currentModel: { provider: "openai", id: "gpt-5" },
+  });
+
+  assert.equal(config.synthesisMaxRetries, 0);
+});
+
+test("loadConsensusConfig rejects invalid synthesisMaxRetries values", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-config-invalid-synthesis-retries-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisMaxRetries: 5,
+    }),
+  );
+
+  assert.throws(
+    () =>
+      loadConsensusConfig({
+        cwd: projectDir,
+        availableModels: [
+          { provider: "anthropic", id: "claude-sonnet-4-5" },
+          { provider: "openai", id: "gpt-5" },
+        ],
+        currentModel: { provider: "openai", id: "gpt-5" },
+      }),
+    (error) => {
+      assert.ok(error instanceof ConsensusConfigError);
+      assert.match(error.message, /synthesisMaxRetries/);
+      return true;
+    },
+  );
+});

@@ -18,6 +18,7 @@ type RawModelRef = string | { provider?: unknown; id?: unknown; contextWindow?: 
 
 export const DEFAULT_PARTICIPANT_CONCURRENCY = 3;
 export const DEFAULT_PARTICIPANT_MAX_RETRIES = 1;
+export const DEFAULT_SYNTHESIS_MAX_RETRIES = 1;
 
 type RawConsensusConfig = {
   models?: unknown;
@@ -28,6 +29,7 @@ type RawConsensusConfig = {
   synthesisTimeoutMs?: unknown;
   participantConcurrency?: unknown;
   participantMaxRetries?: unknown;
+  synthesisMaxRetries?: unknown;
 };
 
 export type ConsensusModelRef = {
@@ -45,6 +47,7 @@ export type ConsensusConfig = {
   synthesisTimeoutMs?: number;
   participantConcurrency?: number;
   participantMaxRetries?: number;
+  synthesisMaxRetries?: number;
 };
 
 export type ResolvedConsensusConfig = Omit<ConsensusConfig, "synthesisModel"> & {
@@ -53,6 +56,7 @@ export type ResolvedConsensusConfig = Omit<ConsensusConfig, "synthesisModel"> & 
   synthesisModel: ConsensusModelRef;
   participantConcurrency: number;
   participantMaxRetries: number;
+  synthesisMaxRetries: number;
   warnings: string[];
 };
 
@@ -121,6 +125,7 @@ export function loadConsensusConfig(options: {
   const synthesisTimeoutMs = normalizeTimeout(rawConfig.synthesisTimeoutMs, "synthesisTimeoutMs");
   const participantConcurrency = normalizeConcurrency(rawConfig.participantConcurrency, "participantConcurrency");
   const participantMaxRetries = normalizeMaxRetries(rawConfig.participantMaxRetries, "participantMaxRetries");
+  const synthesisMaxRetries = normalizeMaxRetries(rawConfig.synthesisMaxRetries, "synthesisMaxRetries");
 
   const synthesisModel = resolveSynthesisModel({
     rawSynthesisModel: rawConfig.synthesisModel,
@@ -141,6 +146,7 @@ export function loadConsensusConfig(options: {
     synthesisTimeoutMs,
     participantConcurrency,
     participantMaxRetries,
+    synthesisMaxRetries,
     warnings,
   };
 }

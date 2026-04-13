@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
-import type { ExcludedParticipantResult, FailedParticipantResult, UsableParticipantResult } from "./participants.ts";
+import { isTransientFailure, type ExcludedParticipantResult, type FailedParticipantResult, type UsableParticipantResult } from "./participants.ts";
 
 export type ConsensusPoint = {
   point: string;
@@ -289,7 +289,8 @@ export async function runConsensusSynthesis(
     timeoutMs: options.config.synthesisTimeoutMs,
   };
 
-  const result = await executeSynthesisInvocation(invocation);
+  const maxRetries = options.config.synthesisMaxRetries;
+  const result = await executeSynthesisInvocationWithRetry(invocation, executeSynthesisInvocation, maxRetries);
   hooks.onResponseReceived?.();
   hooks.onValidationStarted?.();
 
@@ -374,6 +375,34 @@ function createDegradedResult(model: ConsensusModelRef, rawText: string): Synthe
     rawOutputText: rawText,
     output: createFallbackSynthesisOutput(rawText),
   };
+}
+
+async function executeSynthesisInvocationWithRetry(
+  invocation: SynthesisInvocation,
+  executeSynthesisInvocation: SynthesisInvocationExecutor,
+  maxRetries: number,
+): Promise<SynthesisExecutionResult> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await executeSynthesisInvocation(invocation);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const errorMessage = lastError.message;
+
+      // Only retry transient failures, and only if we haven't exhausted retries
+      if (attempt < maxRetries && isTransientFailure(errorMessage)) {
+        continue;
+      }
+
+      // Non-transient failure or exhausted retries
+      throw lastError;
+    }
+  }
+
+  // This should never be reached, but TypeScript needs it
+  throw lastError ?? new Error("Synthesis invocation failed after retries");
 }
 
 function createFallbackSynthesisOutput(rawText: string): ConsensusSynthesisOutput {

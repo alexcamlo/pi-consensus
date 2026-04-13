@@ -17,6 +17,7 @@ const config = {
     { provider: "openai", id: "gpt-5" },
   ],
   synthesisModel: { provider: "openai", id: "gpt-5" },
+  synthesisMaxRetries: 1,
   warnings: [],
 };
 
@@ -445,4 +446,91 @@ test("degraded synthesis result preserves raw text and indicates degraded status
   assert.ok(result.rawOutputText);
   assert.equal(result.output?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
   assert.ok(result.output?.consensusAnswer.includes("incremental migration") || result.output?.consensusAnswer === rawText);
+});
+
+test("runConsensusSynthesis retries transient synthesis failures once before degrading", async () => {
+  let attemptCount = 0;
+  const configWithRetry = { ...config, synthesisMaxRetries: 1 };
+
+  const result = await runConsensusSynthesis(
+    {
+      prompt: "draft a migration plan",
+      cwd: "/tmp/project",
+      config: configWithRetry,
+      usableParticipants: [
+        {
+          model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+          status: "usable",
+          output: "Recommendation: roll out incrementally.",
+          inspectedRepo: true,
+          toolNamesUsed: ["read"],
+        },
+        {
+          model: { provider: "openai", id: "gpt-5" },
+          status: "usable",
+          output: "Recommendation: use a staged migration.",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        },
+      ],
+      excludedParticipants: [],
+    },
+    async (invocation): Promise<SynthesisExecutionResult> => {
+      attemptCount++;
+      // First attempt fails with transient error, retry succeeds
+      if (attemptCount === 1) {
+        throw new Error("synthesis subprocess timed out after 30000ms");
+      }
+      return {
+        model: invocation.model,
+        output: {
+          consensusAnswer: "Use an incremental migration.",
+          overallAgreementPercent: 65,
+          overallDisagreementPercent: 25,
+          overallUnclearPercent: 10,
+          confidencePercent: 76,
+          confidenceLabel: "medium",
+          agreedPoints: [],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        },
+      };
+    },
+  );
+
+  assert.equal(attemptCount, 2); // Initial + 1 retry
+  assert.equal(result.output.consensusAnswer, "Use an incremental migration.");
+});
+
+test("runConsensusSynthesis does not retry non-transient synthesis failures", async () => {
+  let attemptCount = 0;
+  const configWithRetry = { ...config, synthesisMaxRetries: 1 };
+
+  await assert.rejects(
+    runConsensusSynthesis(
+      {
+        prompt: "draft a migration plan",
+        cwd: "/tmp/project",
+        config: configWithRetry,
+        usableParticipants: [
+          {
+            model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+            status: "usable",
+            output: "Recommendation: roll out incrementally.",
+            inspectedRepo: true,
+            toolNamesUsed: ["read"],
+          },
+        ],
+        excludedParticipants: [],
+      },
+      async (): Promise<SynthesisExecutionResult> => {
+        attemptCount++;
+        throw new Error("synthesis subprocess exited with code 1");
+      },
+    ),
+    /synthesis subprocess exited with code 1/,
+  );
+
+  assert.equal(attemptCount, 1); // No retry for non-transient errors
 });
