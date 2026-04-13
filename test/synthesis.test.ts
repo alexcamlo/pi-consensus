@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runConsensusSynthesis, type SynthesisExecutionResult } from "../src/synthesis.ts";
+import {
+  createSynthesisSystemPrompt,
+  runConsensusSynthesis,
+  type SynthesisExecutionResult,
+} from "../src/synthesis.ts";
 
 const config = {
   configPath: ".pi/consensus.json",
@@ -114,6 +118,25 @@ test("runConsensusSynthesis uses the configured synthesis model and passes full 
     systemPrompt: invocations[0]?.systemPrompt ?? "",
   });
   assert.match(invocations[0]?.systemPrompt ?? "", /agreement, disagreement, and unclear percentages that sum to 100/i);
+});
+
+test("createSynthesisSystemPrompt explicitly constrains numeric JSON fields", () => {
+  const systemPrompt = createSynthesisSystemPrompt([
+    {
+      model: { provider: "google", id: "gemini-2.5-pro" },
+      status: "excluded",
+      output: "Maybe refactor it.",
+      exclusionReason: "response was too vague to use for consensus",
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    },
+  ]);
+
+  assert.match(systemPrompt, /Return valid JSON only with no markdown fences or commentary\./i);
+  assert.match(systemPrompt, /All percentage and count fields must be JSON numbers, never strings\./i);
+  assert.match(systemPrompt, /supportingParticipants and totalParticipants must be non-negative JSON integers, never fractions like "2\/3"\./i);
+  assert.match(systemPrompt, /Do not use null, omit required numeric fields, or encode numbers as quoted strings\./i);
+  assert.match(systemPrompt, /"supportPercent":100,"supportingParticipants":2,"totalParticipants":2/i);
 });
 
 test("runConsensusSynthesis rejects invalid structured output when percentages do not sum to 100", async () => {

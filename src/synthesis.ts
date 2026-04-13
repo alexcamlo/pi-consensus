@@ -119,6 +119,8 @@ export function createSynthesisPrompt(
 }
 
 export function createSynthesisSystemPrompt(excludedParticipants: Array<ExcludedParticipantResult | FailedParticipantResult>) {
+  // The synthesis prompt text is part of the output contract: it must steer models toward
+  // schema-valid JSON with numeric fields emitted as numbers/integers, not stringified values.
   const excludedLines =
     excludedParticipants.length === 0
       ? ["Excluded participants: none"]
@@ -136,8 +138,13 @@ export function createSynthesisSystemPrompt(excludedParticipants: Array<Excluded
     "Synthesize the original prompt and the full raw usable participant outputs into a single structured consensus result.",
     "Include: consensusAnswer, overallAgreementPercent, overallDisagreementPercent, overallUnclearPercent, confidencePercent, confidenceLabel, agreedPoints, disagreements, participants, excludedParticipants.",
     "agreement, disagreement, and unclear percentages that sum to 100 are required.",
+    "All percentage and count fields must be JSON numbers, never strings.",
+    "overallAgreementPercent, overallDisagreementPercent, overallUnclearPercent, confidencePercent, agreedPoints[].supportPercent, agreedPoints[].supportingParticipants, and agreedPoints[].totalParticipants are all required numeric fields.",
     "confidencePercent must be a number from 0 to 100 and confidenceLabel must be a short string.",
     "Each agreedPoints entry must include point, supportPercent, supportingParticipants, totalParticipants.",
+    'supportingParticipants and totalParticipants must be non-negative JSON integers, never fractions like "2/3".',
+    "Do not use null, omit required numeric fields, or encode numbers as quoted strings.",
+    'Minimal valid agreedPoints entry example: {"point":"Prefer a staged rollout.","supportPercent":100,"supportingParticipants":2,"totalParticipants":2}.',
     "Each disagreements entry must include point and summary.",
     "Each participants entry must include model and summary.",
     "Each excludedParticipants entry must include model and reason.",

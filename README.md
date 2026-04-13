@@ -91,6 +91,10 @@ Consensus config loading, parallel participant execution, usability filtering, s
 
 Current pi extension APIs document `pi.sendMessage()` and `pi.sendUserMessage()` for command-triggered turns, plus real tool results from `pi.registerTool().execute()`. They do not document a direct way for a slash command handler itself to append a `toolResult` entry. To keep `/consensus` pi-native, the command now injects a hidden assistant-steering message that tells the agent to call the registered `consensus` tool with the exact prompt. The workflow then runs inside the actual tool execution path, so the persisted artifact is a genuine tool result rather than assistant prose or a custom-message approximation.
 
+## Synthesis JSON contract
+
+The synthesis step expects strict structured JSON. Percentage and count fields must be emitted as JSON numbers, never strings. Required numeric fields must not be `null` or omitted, and participant counts such as `agreedPoints[].supportingParticipants` and `agreedPoints[].totalParticipants` must be integers rather than fractions like `"2/3"`.
+
 ## Repo layout
 
 - `src/index.ts` — extension entrypoint and `/consensus` command orchestration
