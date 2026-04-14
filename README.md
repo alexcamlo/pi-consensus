@@ -111,6 +111,20 @@ pi -e ./src/index.ts
 
 or run pi in this repo and let the project-local shim auto-load the extension.
 
+Example commands inside pi:
+
+```text
+/consensus Should we add Redis caching to the API?
+/consensus --stance against Should we add Redis caching to the API?
+/consensus --stance for --focus performance Should we add Redis caching to the API?
+/consensus --focus security Review this auth design for likely risks.
+/consensus --focus "user value" Should we ship this onboarding flow now?
+```
+
+`--stance` accepts `for`, `against`, or `neutral`.
+
+`--focus` accepts `security`, `performance`, `maintainability`, `implementation speed`, or `user value`.
+
 ## Open issues
 
 - Retry weak participant answers that ask for more context instead of evaluating: [#25](https://github.com/alexcamlo/pi-consensus/issues/25)
