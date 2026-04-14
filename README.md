@@ -95,21 +95,35 @@ Consensus output includes:
 - `src/result.ts` — consensus result formatting
 - `test/consensus-extension.test.ts` — workflow and rendering tests
 
-## Local usage
+## Install
+
+### Local install
 
 ```bash
 npm install
 npm run test
 npm run typecheck
-```
-
-Then either:
-
-```bash
 pi -e ./src/index.ts
 ```
 
-or run pi in this repo and let the project-local shim auto-load the extension.
+You can also run pi in this repo and let the project-local shim auto-load the extension.
+
+### Global Pi extension install
+
+Link or copy this repo into your global Pi extensions directory:
+
+```bash
+mkdir -p ~/.pi/agent/extensions
+ln -s /absolute/path/to/pi-consensus/src/index.ts ~/.pi/agent/extensions/pi-consensus.ts
+```
+
+Then start `pi` from any repo.
+
+### Global config path
+
+```text
+~/.pi/agent/consensus.json
+```
 
 Example commands inside pi:
 
