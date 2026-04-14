@@ -2,8 +2,8 @@
   "models": [
     {
       "provider": "openrouter",
-      "id": "z-ai/glm-4-32b",
-      "contextWindow": 128000
+      "id": "anthropic/claude-opus-4.6",
+      "contextWindow": 1000000
     },
     {
       "provider": "openrouter",
