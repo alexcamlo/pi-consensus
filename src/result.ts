@@ -57,6 +57,31 @@ export function createConsensusExecutionResult(
     "## Prompt",
     prompt,
     "",
+    "## Participants",
+    ...participantSummaries.map((summary) => {
+      const participant = participants.find((p) => p.model === summary.model);
+      const framing = [participant?.stance && `stance: ${participant.stance}`, participant?.focus && `focus: ${participant.focus}`].filter(Boolean).join(", ");
+      const framingSuffix = framing ? ` (${framing})` : "";
+      return `- ${summary.model}${framingSuffix} — ${summary.summary}`;
+    }),
+    "",
+    "## Metadata",
+    `- Config: ${config.configPath}`,
+    `- Requested participants: ${config.participants.join(", ")}`,
+    `- Synthesis model: ${config.synthesisModel}`,
+    synthesisStatus ? `- Synthesis status: ${synthesisStatus}${synthesisStatus === "degraded" ? " (result may be less structured)" : ""}` : "",
+    `- Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
+    `- Read-only posture: enabled`,
+    "",
+    "## Debug participant outputs",
+    ...participants.flatMap((participant) => renderParticipantSummary(participant)),
+    "## Excluded",
+    ...(synthesis?.excludedParticipants.length
+      ? synthesis.excludedParticipants.map((participant) => `- ${participant.model} — ${participant.reason}`)
+      : excludedParticipants.length
+        ? excludedParticipants.map((participant) => `- ${participant.model} — ${participant.status === "failed" ? (participant.failureReason ?? "failed") : (participant.exclusionReason ?? "excluded")}`)
+        : ["- None"]),
+    "",
     ...(synthesis
       ? ["## Answer", synthesis.consensusAnswer, ""]
       : ["## Answer", failureMessage ?? "Consensus synthesis was skipped.", ""]),
@@ -85,32 +110,6 @@ export function createConsensusExecutionResult(
     ...(synthesis?.disagreements.length
       ? synthesis.disagreements.map((disagreement) => `- ${disagreement.point} — ${disagreement.summary}`)
       : [failureMessage ? `- ${failureMessage}` : "- None noted"]),
-    "",
-    "## Participants",
-    ...participantSummaries.map((summary) => {
-      const participant = participants.find((p) => p.model === summary.model);
-      const framing = [participant?.stance && `stance: ${participant.stance}`, participant?.focus && `focus: ${participant.focus}`].filter(Boolean).join(", ");
-      const framingSuffix = framing ? ` (${framing})` : "";
-      return `- ${summary.model}${framingSuffix} — ${summary.summary}`;
-    }),
-    "",
-    "## Excluded",
-    ...(synthesis?.excludedParticipants.length
-      ? synthesis.excludedParticipants.map((participant) => `- ${participant.model} — ${participant.reason}`)
-      : excludedParticipants.length
-        ? excludedParticipants.map((participant) => `- ${participant.model} — ${participant.status === "failed" ? (participant.failureReason ?? "failed") : (participant.exclusionReason ?? "excluded")}`)
-        : ["- None"]),
-    "",
-    "## Metadata",
-    `- Config: ${config.configPath}`,
-    `- Requested participants: ${config.participants.join(", ")}`,
-    `- Synthesis model: ${config.synthesisModel}`,
-    synthesisStatus ? `- Synthesis status: ${synthesisStatus}${synthesisStatus === "degraded" ? " (result may be less structured)" : ""}` : "",
-    `- Warnings: ${config.warnings.length === 0 ? "none" : config.warnings.join(" | ")}`,
-    `- Read-only posture: enabled`,
-    "",
-    "## Debug participant outputs",
-    ...participants.flatMap((participant) => renderParticipantSummary(participant)),
   ].join("\n");
 
   return {
