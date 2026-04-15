@@ -33,7 +33,6 @@ Allowed participant tools:
 - `ls`
 - `find`
 - `grep`
-- `multi_grep`
 
 Not allowed:
 

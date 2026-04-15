@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig, type Stance, type Focus } from "./config.ts";
 
-export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep", "multi_grep"] as const;
+export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep"] as const;
 export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
 
 export type ParticipantInvocation = {
