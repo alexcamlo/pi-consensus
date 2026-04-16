@@ -21,7 +21,11 @@ Work on issues in this order:
 3. **Polish** — improving existing functionality (error messages, UX, docs)
 4. **Refactors** — internal cleanups with no user-visible change
 
-Treat all open issues as actionable by default, except issues that are clearly meta/planning-only or explicitly human-owned.
+Treat all open issues as actionable by default, except issues that are clearly meta/planning-only, design-only, parent/tracker issues, or explicitly human-owned.
+
+Prefer **leaf implementation issues** over PRDs, RFCs, umbrella issues, and trackers.
+If any unblocked leaf implementation issue exists, you must work on one of those issues and must not emit the completion signal.
+Only emit the completion signal when there are no unblocked implementation issues left and all remaining open issues are either blocked, HITL, PRD/RFC/parent/tracking-only, or otherwise non-actionable.
 
 Skip any issue with one of these labels:
 - `meta`
@@ -29,6 +33,7 @@ Skip any issue with one of these labels:
 - `prd`
 - `qa-plan`
 - `tracking`
+- `rfc`
 - `hitl`
 
 Also skip issues whose titles begin with:
@@ -37,6 +42,11 @@ Also skip issues whose titles begin with:
 - `Epic:`
 - `Parent:`
 - `Tracking:`
+- `RFC:`
+
+When evaluating whether an issue is actionable, use this rule:
+- If the issue mainly defines direction, architecture, decomposition, or future work, treat it as non-actionable for this run.
+- If the issue defines a concrete buildable slice with acceptance criteria, treat it as actionable unless blocked.
 
 Pick the highest-priority remaining open issue that is not blocked by another open issue.
 
