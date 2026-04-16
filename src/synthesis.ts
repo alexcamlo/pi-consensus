@@ -276,6 +276,7 @@ export async function runConsensusSynthesis(
     onResponseReceived?: () => void;
     onValidationStarted?: () => void;
     onRepairStarted?: (validationError: string) => void;
+    onRetry?: (attempt: number, maxAttempts: number, reason: string) => void;
     onDegraded?: () => void;
   } = {},
 ): Promise<SynthesisExecutionResult> {
@@ -290,7 +291,7 @@ export async function runConsensusSynthesis(
   };
 
   const maxRetries = options.config.synthesisMaxRetries;
-  const result = await executeSynthesisInvocationWithRetry(invocation, executeSynthesisInvocation, maxRetries);
+  const result = await executeSynthesisInvocationWithRetry(invocation, executeSynthesisInvocation, maxRetries, hooks.onRetry);
   hooks.onResponseReceived?.();
   hooks.onValidationStarted?.();
 
@@ -381,6 +382,7 @@ async function executeSynthesisInvocationWithRetry(
   invocation: SynthesisInvocation,
   executeSynthesisInvocation: SynthesisInvocationExecutor,
   maxRetries: number,
+  onRetry?: (attempt: number, maxAttempts: number, reason: string) => void,
 ): Promise<SynthesisExecutionResult> {
   let lastError: Error | undefined;
 
@@ -393,6 +395,7 @@ async function executeSynthesisInvocationWithRetry(
 
       // Only retry transient failures, and only if we haven't exhausted retries
       if (attempt < maxRetries && isTransientFailure(errorMessage)) {
+        onRetry?.(attempt + 2, maxRetries + 1, errorMessage);
         continue;
       }
 

@@ -353,6 +353,143 @@ test("consensus tool validates config, runs synthesis with full participant outp
   assert.equal(commandContext.widgetCleared, true);
 });
 
+test("consensus progress UI shows participant retry state when a participant invocation is retried", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-participant-retry-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      participantMaxRetries: 1,
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  const attempts = new Map<string, number>();
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => {
+      const key = `${invocation.model.provider}/${invocation.model.id}`;
+      const attempt = (attempts.get(key) ?? 0) + 1;
+      attempts.set(key, attempt);
+
+      if (key === "anthropic/claude-sonnet-4-5" && attempt === 1) {
+        return {
+          model: invocation.model,
+          status: "failed",
+          failureReason: "participant subprocess timed out after 30000ms",
+          inspectedRepo: false,
+          toolNamesUsed: [],
+        };
+      }
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: "Recommendation: proceed. Why: clear benefits. Risks/tradeoffs: moderate complexity. Confidence: high.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      };
+    },
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => ({
+      model: invocation.model,
+      output: {
+        consensusAnswer: "Proceed.",
+        overallAgreementPercent: 70,
+        overallDisagreementPercent: 20,
+        overallUnclearPercent: 10,
+        confidencePercent: 80,
+        confidenceLabel: "high",
+        agreedPoints: [],
+        disagreements: [],
+        participants: [],
+        excludedParticipants: [],
+      },
+    }),
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-participant-retry-"));
+
+  await harness.registeredTool?.execute(
+    "tool-call-participant-retry",
+    { prompt: "evaluate this plan" },
+    undefined,
+    undefined,
+    commandContext,
+  );
+
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Retrying\s+↻ claude-sonnet-4-5/.test(line))));
+  assert.equal(attempts.get("anthropic/claude-sonnet-4-5"), 2);
+});
+
+test("consensus progress UI shows synthesis retry state when synthesis is retried", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-retry-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisMaxRetries: 1,
+    }),
+  );
+
+  const harness = createExtensionHarness();
+  let synthesisAttempts = 0;
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => ({
+      model: invocation.model,
+      status: "completed",
+      output: "Recommendation: proceed. Why: clear benefits. Risks/tradeoffs: moderate complexity. Confidence: high.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    }),
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => {
+      synthesisAttempts += 1;
+      if (synthesisAttempts === 1) {
+        throw new Error("synthesis subprocess timed out after 30000ms");
+      }
+
+      return {
+        model: invocation.model,
+        output: {
+          consensusAnswer: "Proceed.",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 80,
+          confidenceLabel: "high",
+          agreedPoints: [],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        },
+      };
+    },
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-retry-"));
+
+  await harness.registeredTool?.execute(
+    "tool-call-synthesis-retry",
+    { prompt: "evaluate this plan" },
+    undefined,
+    undefined,
+    commandContext,
+  );
+
+  assert.equal(synthesisAttempts, 2);
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+↻ retrying/.test(line))));
+});
+
 test("consensus tool shows a clear error when config is missing", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-missing-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-missing-"));
@@ -670,7 +807,7 @@ test("consensus tool reports synthesis output validation failures clearly when s
   ]);
   assert.equal(commandContext.statusUpdates.length, 0);
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+synthesis/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+⚠ degraded/.test(line))));
   assert.equal(synthesisCalls, 2);
   assert.equal(commandContext.widgetCleared, true);
 });
