@@ -284,28 +284,22 @@ test("consensus tool validates config, runs synthesis with full participant outp
     },
   ]);
   assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — config validation/.test(line))),
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+config validation/.test(line))),
   );
   assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Selected participants — anthropic\/claude-sonnet-4-5, openai\/gpt-5/.test(line))),
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Progress\s+\[[█░]+\] 0\/2 done · 0 ok/.test(line))),
   );
   assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Selected synthesis model — openai\/gpt-5/.test(line))),
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Running\s+● claude-sonnet-4-5/.test(line))),
   );
   assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Counts — usable: 0, failed: 0, excluded: 0, remaining: 2/.test(line))),
+    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Done\s+✓ claude-sonnet-4-5/.test(line))),
   );
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — running/.test(line))),
-  );
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /anthropic\/claude-sonnet-4-5 — completed/.test(line))),
-  );
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — pre-synthesis gate/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — running/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — response received/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — validating/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — completed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+pre-synthesis gate/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● running/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● response received/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● validating/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
   assert.ok(commandContext.statusUpdates.some((status) => /validating consensus config/i.test(status)));
   assert.ok(commandContext.statusUpdates.some((status) => /participant pass/i.test(status)));
   assert.ok(commandContext.statusUpdates.some((status) => /pre-synthesis gate/i.test(status)));
@@ -345,7 +339,7 @@ test("consensus tool shows a clear error when config is missing", async () => {
         "Config validation failed: Consensus config not found. Create .pi/consensus.json or ~/.pi/agent/consensus.json with at least 2 participant models.",
     },
   ]);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+failed/.test(line))));
   assert.equal(commandContext.widgetCleared, true);
 });
 
@@ -437,7 +431,7 @@ test("consensus tool stops early, skips synthesis, and explains why when the min
   assert.match(content, /Reason: refusal-only response/);
   assert.match(content, /google\/gemini-2\.5-pro — failed/);
   assert.match(content, /reaching the minimum 2 usable participants became impossible/);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — skipped/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+− skipped/.test(line))));
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
@@ -530,8 +524,8 @@ test("consensus tool clears progress and reports synthesis failures cleanly", as
       message: "Synthesis subprocess failed: synthesis subprocess exited with code 1",
     },
   ]);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — failed/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — failed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+failed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+× failed/.test(line))));
   assert.equal(commandContext.widgetCleared, true);
 });
 
@@ -626,8 +620,8 @@ test("consensus tool reports synthesis output validation failures clearly when s
     },
   ]);
   assert.ok(commandContext.statusUpdates.some((status) => /Validating synthesis output/i.test(status)));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage — synthesis/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synthesis — completed/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+synthesis/.test(line))));
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
   assert.equal(synthesisCalls, 2);
   assert.equal(commandContext.widgetCleared, true);
 });

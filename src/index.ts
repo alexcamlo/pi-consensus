@@ -28,12 +28,6 @@ export default function consensusExtension(
     executeSynthesisInvocation?: SynthesisInvocationExecutor;
   } = {},
 ) {
-  pi.on("session_start", async (event, ctx) => {
-    if (event.reason === "startup" || event.reason === "reload") {
-      ctx.ui.setStatus("pi-consensus", "pi-consensus loaded");
-    }
-  });
-
   pi.registerTool({
     name: TOOL_NAME,
     label: "Consensus",
@@ -371,22 +365,27 @@ function updateConsensusProgress(
     return;
   }
 
-  const statuses = [...progress.participants.values()];
+  const participantEntries = [...progress.participants.entries()];
+  const statuses = participantEntries.map(([, participantStatus]) => participantStatus);
   const usable = statuses.filter((participantStatus) => participantStatus === "completed").length;
   const failed = statuses.filter((participantStatus) => participantStatus === "failed").length;
   const excluded = statuses.filter((participantStatus) => participantStatus === "excluded").length;
   const remaining = statuses.filter((participantStatus) => participantStatus === "pending" || participantStatus === "running").length;
+  const total = participantEntries.length;
+  const finished = total - remaining;
 
   ctx.ui.setStatus?.("pi-consensus", status);
   ctx.ui.setWidget?.("pi-consensus", [
-    "pi-consensus progress",
-    `Stage — ${formatProgressStage(progress.stage)}`,
-    ...(progress.selectedParticipants.length > 0 ? [`Selected participants — ${progress.selectedParticipants.join(", ")}`] : []),
-    ...(progress.synthesisModel ? [`Selected synthesis model — ${progress.synthesisModel}`] : []),
-    `Counts — usable: ${usable}, failed: ${failed}, excluded: ${excluded}, remaining: ${remaining}`,
-    ...[...progress.participants.entries()].map(([model, participantStatus]) => `${model} — ${participantStatus}`),
-    `Synthesis — ${formatSynthesisStatus(progress.synthesis)}`,
-    ...(progress.failureMessage ? [`Failure — ${progress.failureMessage}`] : []),
+    "pi-consensus",
+    "",
+    `Stage      ${formatProgressStage(progress.stage)}`,
+    total > 0
+      ? `Progress   ${renderProgressBar(finished, total)} ${formatProgressSummary(finished, total, usable, failed, excluded)}`
+      : `Progress   ${renderProgressBar(0, 1)} 0/0 done`,
+    `Synth      ${formatSynthesisStatusWithIndicator(progress.synthesis)}`,
+    "",
+    ...formatParticipantStateLines(participantEntries),
+    ...(progress.failureMessage ? ["", `Failure    ${progress.failureMessage}`] : []),
   ]);
 }
 
@@ -504,6 +503,72 @@ function formatSynthesisStatus(status: ConsensusProgressState["synthesis"]) {
     default:
       return status;
   }
+}
+
+function formatSynthesisStatusWithIndicator(status: ConsensusProgressState["synthesis"]) {
+  const label = formatSynthesisStatus(status);
+  switch (status) {
+    case "running":
+    case "response-received":
+    case "validating":
+      return `● ${label}`;
+    case "completed":
+      return `✓ ${label}`;
+    case "skipped":
+      return `− ${label}`;
+    case "failed":
+      return `× ${label}`;
+    default:
+      return `○ ${label}`;
+  }
+}
+
+function formatParticipantStateLines(entries: Array<[string, "pending" | "running" | "completed" | "failed" | "excluded"]>) {
+  const groups: Array<{ label: string; icon: string; statuses: Array<"pending" | "running" | "completed" | "failed" | "excluded"> }> = [
+    { label: "Running", icon: "●", statuses: ["running"] },
+    { label: "Done", icon: "✓", statuses: ["completed"] },
+    { label: "Queued", icon: "○", statuses: ["pending"] },
+    { label: "Failed", icon: "×", statuses: ["failed"] },
+    { label: "Excluded", icon: "−", statuses: ["excluded"] },
+  ];
+
+  const lines: string[] = [];
+  for (const group of groups) {
+    const models = entries
+      .filter(([, status]) => group.statuses.includes(status))
+      .map(([model]) => formatProgressModelLabel(model));
+    if (models.length === 0) {
+      continue;
+    }
+    lines.push(`${group.label.padEnd(10, " ")}${group.icon} ${models.join(", ")}`);
+  }
+
+  return lines;
+}
+
+function formatProgressSummary(finished: number, total: number, usable: number, failed: number, excluded: number) {
+  const parts = [`${finished}/${total} done`, `${usable} ok`];
+  if (failed > 0) {
+    parts.push(`${failed} failed`);
+  }
+  if (excluded > 0) {
+    parts.push(`${excluded} excluded`);
+  }
+  return parts.join(" · ");
+}
+
+function formatProgressModelLabel(model: string) {
+  const parts = model.split("/");
+  if (parts.length >= 2) {
+    return parts[parts.length - 1] ?? model;
+  }
+  return model;
+}
+
+function renderProgressBar(completed: number, total: number, width = 10) {
+  const safeTotal = Math.max(total, 1);
+  const filled = Math.max(0, Math.min(width, Math.round((completed / safeTotal) * width)));
+  return `[${"█".repeat(filled)}${"░".repeat(width - filled)}]`;
 }
 
 function capitalize(value: string) {
