@@ -6,7 +6,7 @@ import test from "node:test";
 
 import consensusExtension from "../src/index.ts";
 import { createConsensusExecutionResult } from "../src/result.ts";
-import type { SynthesisExecutionResult } from "../src/synthesis.ts";
+import type { SynthesisInvocationResult } from "../src/synthesis.ts";
 
 test("createConsensusExecutionResult returns formatted consensus text with debug participant details", () => {
   const result = createConsensusExecutionResult(
@@ -245,7 +245,7 @@ test("consensus tool validates config, runs synthesis with full participant outp
         toolNamesUsed: ["read"],
       };
     },
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => {
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => {
       synthesisInvocations.push({
         model: `${invocation.model.provider}/${invocation.model.id}`,
         cwd: invocation.cwd,
@@ -428,7 +428,7 @@ test("consensus progress UI shows participant retry state when a participant inv
         toolNamesUsed: ["read"],
       };
     },
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => ({
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => ({
       model: invocation.model,
       output: {
         consensusAnswer: "Proceed.",
@@ -485,7 +485,7 @@ test("consensus progress UI shows synthesis retry state when synthesis is retrie
       inspectedRepo: true,
       toolNamesUsed: ["read"],
     }),
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisExecutionResult> => {
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => {
       synthesisAttempts += 1;
       if (synthesisAttempts === 1) {
         throw new Error("synthesis subprocess timed out after 30000ms");
@@ -805,7 +805,7 @@ test("consensus tool reports synthesis output validation failures clearly when s
           ],
           excludedParticipants: [],
         },
-      } as SynthesisExecutionResult;
+      } as SynthesisInvocationResult;
     },
   });
 

@@ -55,13 +55,26 @@ export type SynthesisInvocation = {
   env?: NodeJS.ProcessEnv;
 };
 
-export type SynthesisExecutionResult = {
+export type SynthesisInvocationResult = {
   model: ConsensusModelRef;
   output: ConsensusSynthesisOutput;
   rawOutputText?: string;
-  status?: "full" | "repaired" | "degraded";
-  degradedText?: string;
 };
+
+export type SynthesisExecutionResult =
+  | {
+      status: "full" | "repaired";
+      model: ConsensusModelRef;
+      output: ConsensusSynthesisOutput;
+      rawOutputText?: string;
+    }
+  | {
+      status: "degraded";
+      model: ConsensusModelRef;
+      output: ConsensusSynthesisOutput;
+      rawOutputText: string;
+      degradedText: string;
+    };
 
 export type NormalizedSynthesisResult =
   | { status: "full"; output: ConsensusSynthesisOutput }
@@ -69,7 +82,7 @@ export type NormalizedSynthesisResult =
   | { status: "normalized"; output: ConsensusSynthesisOutput }
   | { status: "unrecoverable"; output?: undefined };
 
-export type SynthesisInvocationExecutor = (invocation: SynthesisInvocation) => Promise<SynthesisExecutionResult>;
+export type SynthesisInvocationExecutor = (invocation: SynthesisInvocation) => Promise<SynthesisInvocationResult>;
 
 export class InvalidConsensusSynthesisOutputError extends Error {
   constructor(message: string) {
@@ -302,15 +315,13 @@ export async function runConsensusSynthesis(
   // Try normalization first (handles extraction, coercion, arrays)
   const normalized = normalizeSynthesisOutput(result.rawOutputText ?? JSON.stringify(result.output));
   if (normalized.status !== "unrecoverable") {
-    // Map normalization status to synthesis result status
-    // "extracted" and "normalized" indicate successful normalization of initial output
-    const status: "full" | "repaired" | "degraded" =
-      normalized.status === "full" ? "full" : "full";
+    // Internal normalization variants (full/extracted/normalized) are intentionally
+    // collapsed into a single caller-visible full synthesis outcome.
     return {
+      status: "full",
       model: result.model,
       output: normalized.output,
       rawOutputText: result.rawOutputText,
-      status,
     };
   }
 
@@ -336,7 +347,7 @@ export async function runConsensusSynthesis(
     systemPrompt: createSynthesisRepairSystemPrompt(),
   };
 
-  let repairedResult: SynthesisExecutionResult;
+  let repairedResult: SynthesisInvocationResult;
   try {
     repairedResult = await executeSynthesisInvocation(repairInvocation);
   } catch (repairError) {
@@ -387,7 +398,7 @@ async function executeSynthesisInvocationWithRetry(
   executeSynthesisInvocation: SynthesisInvocationExecutor,
   maxRetries: number,
   onRetry?: (attempt: number, maxAttempts: number, reason: string) => void,
-): Promise<SynthesisExecutionResult> {
+): Promise<SynthesisInvocationResult> {
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -505,7 +516,7 @@ export function createSynthesisRepairSystemPrompt() {
   ].join(" ");
 }
 
-export async function runSynthesisInvocation(invocation: SynthesisInvocation): Promise<SynthesisExecutionResult> {
+export async function runSynthesisInvocation(invocation: SynthesisInvocation): Promise<SynthesisInvocationResult> {
   return new Promise((resolve, reject) => {
     const command = invocation.piCommand ?? "pi";
     const args = [

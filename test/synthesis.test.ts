@@ -7,7 +7,7 @@ import {
   normalizeSynthesisOutput,
   runConsensusSynthesis,
   readSynthesisEventLine,
-  type SynthesisExecutionResult,
+  type SynthesisInvocationResult,
 } from "../src/synthesis.ts";
 
 const config = {
@@ -57,7 +57,7 @@ test("runConsensusSynthesis uses the configured synthesis model and passes full 
         },
       ],
     },
-    async (invocation): Promise<SynthesisExecutionResult> => {
+    async (invocation): Promise<SynthesisInvocationResult> => {
       invocations.push({
         model: `${invocation.model.provider}/${invocation.model.id}`,
         cwd: invocation.cwd,
@@ -110,6 +110,7 @@ test("runConsensusSynthesis uses the configured synthesis model and passes full 
     },
   );
 
+  assert.equal(result.status, "full");
   assert.equal(result.model.provider, "openai");
   assert.equal(result.output.consensusAnswer, "Use an incremental migration.");
   assert.equal(invocations.length, 1);
@@ -169,7 +170,7 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
       ],
       excludedParticipants: [],
     },
-    async (invocation): Promise<SynthesisExecutionResult> => {
+    async (invocation): Promise<SynthesisInvocationResult> => {
       invocations.push({ prompt: invocation.prompt, systemPrompt: invocation.systemPrompt });
 
       if (invocations.length === 1) {
@@ -272,7 +273,7 @@ test("runConsensusSynthesis returns degraded result when repair also fails", asy
       ],
       excludedParticipants: [],
     },
-    async (invocation): Promise<SynthesisExecutionResult> => {
+    async (invocation): Promise<SynthesisInvocationResult> => {
       invocations.push({ prompt: invocation.prompt, systemPrompt: invocation.systemPrompt });
 
       return {
@@ -424,7 +425,7 @@ test("degraded synthesis result preserves raw text and indicates degraded status
       ],
       excludedParticipants: [],
     },
-    async (invocation): Promise<SynthesisExecutionResult> => ({
+    async (invocation): Promise<SynthesisInvocationResult> => ({
       model: invocation.model,
       rawOutputText: rawText,
       output: {
@@ -476,7 +477,7 @@ test("runConsensusSynthesis retries transient synthesis failures once before deg
       ],
       excludedParticipants: [],
     },
-    async (invocation): Promise<SynthesisExecutionResult> => {
+    async (invocation): Promise<SynthesisInvocationResult> => {
       attemptCount++;
       // First attempt fails with transient error, retry succeeds
       if (attemptCount === 1) {
@@ -544,7 +545,7 @@ test("runConsensusSynthesis does not retry non-transient synthesis failures", as
         ],
         excludedParticipants: [],
       },
-      async (): Promise<SynthesisExecutionResult> => {
+      async (): Promise<SynthesisInvocationResult> => {
         attemptCount++;
         throw new Error("synthesis subprocess exited with code 1");
       },
