@@ -220,8 +220,12 @@ async function executeConsensusWorkflow(
               progress.synthesis = "validating";
               updateConsensusProgress(ctx, progress, "Validating synthesis output...");
             },
+            onRetry: (attempt, maxAttempts) => {
+              progress.synthesis = "retrying";
+              updateConsensusProgress(ctx, progress, `Retrying synthesis (attempt ${attempt}/${maxAttempts})...`);
+            },
             onDegraded: () => {
-              progress.synthesis = "completed";
+              progress.synthesis = "degraded";
               updateConsensusProgress(ctx, progress, "Synthesis completed (degraded mode).");
             },
           },
@@ -312,8 +316,8 @@ type ConsensusProgressState = {
     | "failed";
   selectedParticipants: string[];
   synthesisModel?: string;
-  participants: Map<string, "pending" | "running" | "completed" | "failed" | "excluded">;
-  synthesis: "pending" | "running" | "response-received" | "validating" | "completed" | "skipped" | "failed";
+  participants: Map<string, "pending" | "running" | "retrying" | "completed" | "failed" | "excluded">;
+  synthesis: "pending" | "running" | "retrying" | "response-received" | "validating" | "completed" | "degraded" | "skipped" | "failed";
   failureMessage?: string;
 };
 
@@ -331,10 +335,20 @@ function createProgressParticipantExecutor(
   ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } },
   executor?: ParticipantInvocationExecutor,
 ): ParticipantInvocationExecutor {
+  const attemptsByModel = new Map<string, number>();
+
   return async (invocation) => {
     const model = formatModelRef(invocation.model);
-    progress.participants.set(model, "running");
-    updateConsensusProgress(ctx, progress, `Running participant pass... ${model}`);
+    const attempt = (attemptsByModel.get(model) ?? 0) + 1;
+    attemptsByModel.set(model, attempt);
+
+    if (attempt > 1) {
+      progress.participants.set(model, "retrying");
+      updateConsensusProgress(ctx, progress, `Retrying participant ${model} (attempt ${attempt})...`);
+    } else {
+      progress.participants.set(model, "running");
+      updateConsensusProgress(ctx, progress, `Running participant pass... ${model}`);
+    }
 
     const result = await (executor ?? runParticipantInvocation)(invocation);
 
@@ -371,7 +385,7 @@ function updateConsensusProgress(
   const usable = statuses.filter((participantStatus) => participantStatus === "completed").length;
   const failed = statuses.filter((participantStatus) => participantStatus === "failed").length;
   const excluded = statuses.filter((participantStatus) => participantStatus === "excluded").length;
-  const remaining = statuses.filter((participantStatus) => participantStatus === "pending" || participantStatus === "running").length;
+  const remaining = statuses.filter((participantStatus) => participantStatus === "pending" || participantStatus === "running" || participantStatus === "retrying").length;
   const total = participantEntries.length;
   const finished = total - remaining;
 
@@ -500,6 +514,10 @@ function formatSynthesisStatus(status: ConsensusProgressState["synthesis"]) {
       return "waiting";
     case "response-received":
       return "response received";
+    case "retrying":
+      return "retrying";
+    case "degraded":
+      return "degraded";
     default:
       return status;
   }
@@ -512,8 +530,12 @@ function formatSynthesisStatusWithIndicator(status: ConsensusProgressState["synt
     case "response-received":
     case "validating":
       return `● ${label}`;
+    case "retrying":
+      return `↻ ${label}`;
     case "completed":
       return `✓ ${label}`;
+    case "degraded":
+      return `⚠ ${label}`;
     case "skipped":
       return `− ${label}`;
     case "failed":
@@ -523,9 +545,10 @@ function formatSynthesisStatusWithIndicator(status: ConsensusProgressState["synt
   }
 }
 
-function formatParticipantStateLines(entries: Array<[string, "pending" | "running" | "completed" | "failed" | "excluded"]>) {
-  const groups: Array<{ label: string; icon: string; statuses: Array<"pending" | "running" | "completed" | "failed" | "excluded"> }> = [
+function formatParticipantStateLines(entries: Array<[string, "pending" | "running" | "retrying" | "completed" | "failed" | "excluded"]>) {
+  const groups: Array<{ label: string; icon: string; statuses: Array<"pending" | "running" | "retrying" | "completed" | "failed" | "excluded"> }> = [
     { label: "Running", icon: "●", statuses: ["running"] },
+    { label: "Retrying", icon: "↻", statuses: ["retrying"] },
     { label: "Done", icon: "✓", statuses: ["completed"] },
     { label: "Queued", icon: "○", statuses: ["pending"] },
     { label: "Failed", icon: "×", statuses: ["failed"] },
