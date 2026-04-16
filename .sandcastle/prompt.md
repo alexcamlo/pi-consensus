@@ -88,6 +88,6 @@ Pick the lowest-numbered remaining `ready-for-agent` issue that is not blocked b
 
 # Done
 
-When all actionable issues are complete (or you are blocked on all remaining ones), output the completion signal:
-
-<promise>COMPLETE</promise>
+Do not output `<promise>COMPLETE</promise>`.
+Do not output any custom completion token.
+When no `ready-for-agent` issue is actionable, briefly explain why in plain text and stop.

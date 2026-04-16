@@ -51,6 +51,12 @@ await run({
   // per run, or set it to 1 for a single-shot mode.
   maxIterations: 8,
 
+  // Disable prompt-driven early termination for this provider. Its stdout can
+  // include echoed prompt text, so any user-visible completion token becomes a
+  // false-positive match. Use an internal sentinel that is never mentioned in
+  // the prompt.
+  completionSignal: "__SANDCASTLE_INTERNAL_NEVER_EMIT_5b9c7d1f__",
+
   logging: { type: "stdout" },
 
   // Lifecycle hooks — commands that run inside the sandbox at specific points.
