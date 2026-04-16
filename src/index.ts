@@ -359,7 +359,7 @@ function createProgressSynthesisExecutor(
 function updateConsensusProgress(
   ctx: { hasUI?: boolean; ui: { setStatus?: (key: string, status?: string) => void; setWidget?: (key: string, widget?: string[]) => void } },
   progress: ConsensusProgressState,
-  status: string,
+  _status: string,
 ) {
   if (ctx.hasUI === false) {
     return;
@@ -374,7 +374,6 @@ function updateConsensusProgress(
   const total = participantEntries.length;
   const finished = total - remaining;
 
-  ctx.ui.setStatus?.("pi-consensus", status);
   ctx.ui.setWidget?.("pi-consensus", [
     "pi-consensus",
     "",

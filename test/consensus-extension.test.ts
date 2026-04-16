@@ -300,11 +300,7 @@ test("consensus tool validates config, runs synthesis with full participant outp
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● response received/.test(line))));
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● validating/.test(line))));
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
-  assert.ok(commandContext.statusUpdates.some((status) => /validating consensus config/i.test(status)));
-  assert.ok(commandContext.statusUpdates.some((status) => /participant pass/i.test(status)));
-  assert.ok(commandContext.statusUpdates.some((status) => /pre-synthesis gate/i.test(status)));
-  assert.ok(commandContext.statusUpdates.some((status) => /synthesis response received/i.test(status)));
-  assert.ok(commandContext.statusUpdates.some((status) => /validating synthesis output/i.test(status)));
+  assert.equal(commandContext.statusUpdates.length, 0);
   assert.equal(commandContext.widgetCleared, true);
 });
 
@@ -619,7 +615,7 @@ test("consensus tool reports synthesis output validation failures clearly when s
       message: "pi-consensus participant pass and synthesis completed.",
     },
   ]);
-  assert.ok(commandContext.statusUpdates.some((status) => /Validating synthesis output/i.test(status)));
+  assert.equal(commandContext.statusUpdates.length, 0);
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+synthesis/.test(line))));
   assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
   assert.equal(synthesisCalls, 2);
