@@ -38,9 +38,9 @@ await run({
   sandbox: docker(),
   branchStrategy: { type: "merge-to-head" },
 
-  // The agent provider. Use an env-backed model for Sandcastle so sandbox runs
-  // do not depend on interactive subscription auth.
-  agent: pi("openrouter/moonshotai/kimi-k2.5"),
+  // The agent provider. Use a free OpenRouter model so Sandcastle runs do not
+  // depend on paid credits or interactive subscription auth.
+  agent: pi("openrouter/openai/gpt-oss-120b:free"),
 
   // Path to the prompt file. Shell expressions inside are evaluated inside the
   // sandbox at the start of each iteration, so the agent always sees fresh data.
