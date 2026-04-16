@@ -22,7 +22,7 @@
     "@sinclair/typebox": "^0.34.41"
   },
   "devDependencies": {
-    "@ai-hero/sandcastle": "^0.4.3",
+    "@ai-hero/sandcastle": "^0.4.7",
     "@types/node": "^24.5.2",
     "typescript": "^5.9.2"
   }
