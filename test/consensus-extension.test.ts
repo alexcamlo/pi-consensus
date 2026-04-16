@@ -108,6 +108,44 @@ test("createConsensusExecutionResult includes raw synthesis output in details an
   assert.match(result.text, /\{"consensusAnswer":"Use staged rollout","overallAgreementPercent":"70"\}/);
 });
 
+test("createConsensusExecutionResult surfaces warning-bearing usable participants in details and markdown", () => {
+  const result = createConsensusExecutionResult(
+    "evaluate rollout",
+    {
+      configPath: ".pi/consensus.json",
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisModel: "openai/gpt-5",
+      warnings: [],
+    },
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        status: "usable-with-warning",
+        output: "Recommendation: proceed incrementally.",
+        warningReasons: ["missing structured sections: why, risks/tradeoffs, confidence, repo evidence"],
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      },
+      {
+        model: "openai/gpt-5",
+        status: "usable",
+        output: "Recommendation: proceed. Why: minimizes risk. Risks/tradeoffs: slower rollout. Confidence: high.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      },
+    ],
+  );
+
+  assert.equal(result.details.usableParticipantCount, 2);
+  assert.equal(result.details.excludedParticipantCount, 0);
+  assert.equal(result.details.participants[0]?.status, "usable-with-warning");
+  assert.deepEqual(result.details.participants[0]?.warningReasons, [
+    "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
+  ]);
+  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable-with-warning/);
+  assert.match(result.text, /Warnings: missing structured sections: why, risks\/tradeoffs, confidence, repo evidence/);
+});
+
 test("consensus command relays through a hidden assistant tool-call message when idle", async () => {
   const harness = createExtensionHarness();
   consensusExtension(harness.pi as never);

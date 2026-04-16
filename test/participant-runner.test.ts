@@ -656,6 +656,33 @@ test("filterParticipantOutputs excludes non-evaluative responses that were not r
   assert.equal(filtered.excluded[0]?.exclusionReason, "non-evaluative response asking for more context");
 });
 
+test("filterParticipantOutputs marks borderline responses as usable-with-warning with explicit reasons", () => {
+  const filtered = filterParticipantOutputs([
+    {
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+      status: "completed",
+      output: "Recommendation: Proceed with incremental rollout to limit deployment risk.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    },
+    {
+      model: { provider: "openai", id: "gpt-5" },
+      status: "completed",
+      output: "Recommendation: Proceed. Why: Better reliability. Risks/tradeoffs: More coordination overhead. Confidence: medium.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    },
+  ]);
+
+  assert.equal(filtered.usable.length, 2);
+  assert.equal(filtered.excluded.length, 0);
+  assert.equal(filtered.usable[0]?.status, "usable-with-warning");
+  assert.deepEqual(filtered.usable[0]?.warningReasons, [
+    "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
+  ]);
+  assert.equal(filtered.failureMessage, undefined);
+});
+
 test("runParticipantPass retries weak non-evaluative responses once with stricter prompt", async () => {
   let attemptCount = 0;
   const configWithRetry = {

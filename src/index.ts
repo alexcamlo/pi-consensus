@@ -414,12 +414,12 @@ function clearConsensusProgress(ctx: { hasUI?: boolean; ui: { setStatus?: (key: 
 
 function syncFilteredParticipantStatuses(
   progress: ConsensusProgressState,
-  participants: Array<{ model: { provider: string; id: string }; status: "usable" | "excluded" | "failed" }>,
+  participants: Array<{ model: { provider: string; id: string }; status: "usable" | "usable-with-warning" | "excluded" | "failed" }>,
 ) {
   for (const participant of participants) {
     progress.participants.set(
       formatModelRef(participant.model),
-      participant.status === "usable" ? "completed" : participant.status,
+      participant.status === "usable" || participant.status === "usable-with-warning" ? "completed" : participant.status,
     );
   }
 }
@@ -609,10 +609,11 @@ function toConsensusSummary(config: ResolvedConsensusConfig) {
 
 function toParticipantSummary(participant: {
   model: { provider: string; id: string; stance?: "for" | "against" | "neutral"; focus?: "security" | "performance" | "maintainability" | "implementation speed" | "user value" };
-  status: "usable" | "excluded" | "failed";
+  status: "usable" | "usable-with-warning" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
   exclusionReason?: string;
+  warningReasons?: string[];
   inspectedRepo: boolean;
   toolNamesUsed: string[];
   retried?: boolean;
@@ -624,6 +625,7 @@ function toParticipantSummary(participant: {
     output: participant.output,
     failureReason: participant.failureReason,
     exclusionReason: participant.exclusionReason,
+    warningReasons: participant.warningReasons,
     inspectedRepo: participant.inspectedRepo,
     toolNamesUsed: participant.toolNamesUsed,
     stance: participant.model.stance,

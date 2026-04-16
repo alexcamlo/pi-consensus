@@ -10,10 +10,11 @@ type ConsensusExecutionSummary = {
 
 type ParticipantExecutionSummary = {
   model: string;
-  status: "usable" | "excluded" | "failed";
+  status: "usable" | "usable-with-warning" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
   exclusionReason?: string;
+  warningReasons?: string[];
   inspectedRepo: boolean;
   toolNamesUsed: string[];
   stance?: Stance;
@@ -48,10 +49,14 @@ export function createConsensusExecutionResult(
   synthesisStatus?: "full" | "repaired" | "degraded",
   rawSynthesisOutputText?: string,
 ): ConsensusExecutionResult {
-  const usableParticipantCount = participants.filter((participant) => participant.status === "usable").length;
+  const usableParticipantCount = participants.filter(
+    (participant) => participant.status === "usable" || participant.status === "usable-with-warning",
+  ).length;
   const excludedParticipantCount = participants.filter((participant) => participant.status === "excluded").length;
   const failedParticipantCount = participants.filter((participant) => participant.status === "failed").length;
-  const excludedParticipants = participants.filter((participant) => participant.status !== "usable");
+  const excludedParticipants = participants.filter(
+    (participant) => participant.status === "excluded" || participant.status === "failed",
+  );
   const participantSummaries = synthesis?.participants ?? participants.map((participant) => ({ model: participant.model, summary: participant.status }));
   const text = [
     "# Consensus",
@@ -157,6 +162,9 @@ function renderParticipantSummary(participant: ParticipantExecutionSummary) {
   return [
     headline,
     ...(participant.status === "excluded" ? [`- Reason: ${participant.exclusionReason ?? "excluded from consensus"}`] : []),
+    ...(participant.status === "usable-with-warning"
+      ? [`- Warnings: ${participant.warningReasons?.length ? participant.warningReasons.join(" | ") : "borderline but still usable"}`]
+      : []),
     `- Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
     `- Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,
     `- Output: ${participant.output ?? ""}`,

@@ -53,17 +53,18 @@ export type ParticipantPassResult = {
 
 export type FilteredParticipantResult = {
   model: ConsensusModelRef;
-  status: "usable" | "excluded" | "failed";
+  status: "usable" | "usable-with-warning" | "excluded" | "failed";
   output?: string;
   failureReason?: string;
   exclusionReason?: string;
+  warningReasons?: string[];
   inspectedRepo: boolean;
   toolNamesUsed: string[];
   retried?: boolean;
   retryReason?: string;
 };
 
-export type UsableParticipantResult = FilteredParticipantResult & { status: "usable"; output: string };
+export type UsableParticipantResult = FilteredParticipantResult & { status: "usable" | "usable-with-warning"; output: string };
 export type ExcludedParticipantResult = FilteredParticipantResult & { status: "excluded" };
 export type FailedParticipantResult = FilteredParticipantResult & { status: "failed" };
 
@@ -245,12 +246,12 @@ export async function runParticipantPass(
         };
 
         participants[index] = resultWithRetryInfo;
-        if (classifyParticipantOutput(retryResult).status === "usable") {
+        if (isUsableClassification(classifyParticipantOutput(retryResult))) {
           usableCount += 1;
         }
       } else {
         participants[index] = firstResult;
-        if (classifyParticipantOutput(firstResult).status === "usable") {
+        if (isUsableClassification(classifyParticipantOutput(firstResult))) {
           usableCount += 1;
         }
       }
@@ -558,7 +559,11 @@ export function buildParticipantCommand(invocation: ParticipantInvocation) {
 }
 
 function isUsableParticipant(participant: FilteredParticipantResult): participant is UsableParticipantResult {
-  return participant.status === "usable";
+  return participant.status === "usable" || participant.status === "usable-with-warning";
+}
+
+function isUsableClassification(participant: FilteredParticipantResult) {
+  return participant.status === "usable" || participant.status === "usable-with-warning";
 }
 
 function isExcludedParticipant(participant: FilteredParticipantResult): participant is ExcludedParticipantResult {
@@ -618,6 +623,16 @@ function classifyParticipantOutput(participant: ParticipantExecutionResult): Fil
     };
   }
 
+  const warningReasons = getBorderlineWarningReasons(output);
+  if (warningReasons.length > 0) {
+    return {
+      ...participant,
+      status: "usable-with-warning",
+      output,
+      warningReasons,
+    };
+  }
+
   return {
     ...participant,
     status: "usable",
@@ -648,6 +663,21 @@ function looksTooVague(output: string) {
 
   const wordCount = normalized.split(/\s+/).filter(Boolean).length;
   return wordCount <= 6;
+}
+
+function getBorderlineWarningReasons(output: string) {
+  const missingSections = [
+    { label: "why", pattern: /\bwhy\s*:/i },
+    { label: "risks/tradeoffs", pattern: /\brisks?\s*\/\s*tradeoffs?\s*:/i },
+    { label: "confidence", pattern: /\bconfidence\s*:/i },
+    { label: "repo evidence", pattern: /\brepo evidence\s*:/i },
+  ].filter((section) => !section.pattern.test(output));
+
+  if (missingSections.length === 0) {
+    return [];
+  }
+
+  return [`missing structured sections: ${missingSections.map((section) => section.label).join(", ")}`];
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | undefined {
