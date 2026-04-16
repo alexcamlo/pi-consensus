@@ -54,8 +54,16 @@ Example:
 ```json
 {
   "models": [
-    "anthropic/claude-sonnet-4-5",
-    "openai/gpt-5",
+    {
+      "provider": "anthropic",
+      "id": "claude-sonnet-4-5",
+      "stance": "for"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-5",
+      "stance": "against"
+    },
     {
       "provider": "google",
       "id": "gemini-2.5-pro",
@@ -70,6 +78,8 @@ Example:
   "synthesisTimeoutMs": 90000
 }
 ```
+
+Prefer per-model `stance` and `focus` in config for normal use. `/consensus --stance ...` and `/consensus --focus ...` are one-run overrides that apply to all participants for that run only.
 
 ## Result shape
 
@@ -100,23 +110,22 @@ Consensus output includes:
 
 ```bash
 npm install
-npm run test
-npm run typecheck
 pi -e ./src/index.ts
 ```
 
-You can also run pi in this repo and let the project-local shim auto-load the extension.
-
-### Global Pi extension install
-
-Link or copy this repo into your global Pi extensions directory:
+### Git install via Pi
 
 ```bash
-mkdir -p ~/.pi/agent/extensions
-ln -s /absolute/path/to/pi-consensus/src/index.ts ~/.pi/agent/extensions/pi-consensus.ts
+pi install git:github.com/alexcamlo/pi-consensus
 ```
 
-Then start `pi` from any repo.
+### npm install via Pi
+
+Not available yet. Once published to npm, install with:
+
+```bash
+pi install npm:pi-consensus
+```
 
 ### Global config path
 
@@ -134,9 +143,9 @@ Example commands inside pi:
 /consensus --focus "user value" Should we ship this onboarding flow now?
 ```
 
-`--stance` accepts `for`, `against`, or `neutral`.
+`--stance` accepts `for`, `against`, or `neutral` and overrides all participants for that run.
 
-`--focus` accepts `security`, `performance`, `maintainability`, `implementation speed`, or `user value`.
+`--focus` accepts `security`, `performance`, `maintainability`, `implementation speed`, or `user value` and overrides all participants for that run.
 
 ## Open issues
 

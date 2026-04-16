@@ -694,7 +694,7 @@ test("consensus command warns when prompt is missing", async () => {
   assert.deepEqual(commandContext.notifications, [
     {
       level: "warning",
-      message: "Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>",
+      message: "Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>\nPer-model stance/focus belongs in .pi/consensus.json; flags override all participants for this run only.",
     },
   ]);
 });

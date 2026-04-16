@@ -45,8 +45,8 @@ export default function consensusExtension(
     ],
     parameters: Type.Object({
       prompt: Type.String({ description: "The user prompt to evaluate across multiple models." }),
-      stance: Type.Optional(Type.String({ description: "Override stance for all participants: for, against, or neutral." })),
-      focus: Type.Optional(Type.String({ description: "Override focus for all participants: security, performance, maintainability, implementation speed, or user value." })),
+      stance: Type.Optional(Type.String({ description: "One-run override for all participants: for, against, or neutral. Prefer per-model stance in config for normal use." })),
+      focus: Type.Optional(Type.String({ description: "One-run override for all participants: security, performance, maintainability, implementation speed, or user value. Prefer per-model focus in config for normal use." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       return executeConsensusWorkflow(params.prompt, ctx, dependencies, {
@@ -70,7 +70,7 @@ export default function consensusExtension(
   });
 
   pi.registerCommand(COMMAND_NAME, {
-    description: "Run the pi-consensus workflow for a prompt. Optional: --stance for|against|neutral --focus security|performance|maintainability|implementation speed|user value",
+    description: "Run the pi-consensus workflow for a prompt. Prefer per-model stance/focus in config; optional --stance/--focus flags override all participants for one run.",
     handler: async (args, ctx) => {
       const parsed = parseConsensusCommandArgs(args.trim());
 
@@ -80,7 +80,7 @@ export default function consensusExtension(
       }
 
       if (!parsed.prompt) {
-        ctx.ui.notify("Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>", "warning");
+        ctx.ui.notify("Usage: /consensus [--stance for|against|neutral] [--focus security|performance|maintainability|\"implementation speed\"|\"user value\"] <prompt>\nPer-model stance/focus belongs in .pi/consensus.json; flags override all participants for this run only.", "warning");
         return;
       }
 
