@@ -25,11 +25,13 @@ Work on issues in this order:
 3. **Polish** — improving existing functionality (error messages, UX, docs)
 4. **Refactors** — internal cleanups with no user-visible change
 
-Use **ready-for-agent issues** as the authoritative work queue.
+Use **ready-for-agent issues** as a hard, pre-approved work queue.
 If one or more open issues have the `ready-for-agent` label, you must choose only from those issues.
-If any unblocked `ready-for-agent` issue exists, you must work on one of them and must not emit the completion signal.
-Only emit the completion signal when there are no unblocked `ready-for-agent` issues left.
+Do not re-evaluate whether a `ready-for-agent` issue is actionable, strategic, refactor-only, or worth doing: the label means it is approved for autonomous implementation.
+If any open `ready-for-agent` issue is not explicitly blocked by another still-open issue, you must work on one of those issues and must not emit the completion signal.
+Only emit the completion signal when there are zero open `ready-for-agent` issues, or every remaining `ready-for-agent` issue is explicitly blocked or HITL.
 
+When multiple `ready-for-agent` issues are available, pick the lowest-numbered unblocked one.
 Treat unlabeled open issues as background context only unless there are zero open `ready-for-agent` issues.
 If there are zero open `ready-for-agent` issues, then fall back to evaluating all open issues and treat only concrete leaf implementation issues as actionable. Skip issues that are clearly meta/planning-only, design-only, parent/tracker issues, or explicitly human-owned.
 
@@ -56,7 +58,7 @@ When evaluating whether an issue is actionable, use this rule:
 - If the issue mainly defines direction, architecture, decomposition, or future work, treat it as non-actionable for this run.
 - If the issue defines a concrete buildable slice with acceptance criteria, treat it as actionable unless blocked.
 
-Pick the highest-priority remaining `ready-for-agent` issue that is not blocked by another open issue. If there are no open `ready-for-agent` issues, pick the highest-priority remaining actionable open issue that is not blocked by another open issue.
+Pick the lowest-numbered remaining `ready-for-agent` issue that is not blocked by another open issue. If there are no open `ready-for-agent` issues, pick the highest-priority remaining actionable open issue that is not blocked by another open issue.
 
 ## Workflow
 
