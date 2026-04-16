@@ -6,6 +6,7 @@ import {
   createSynthesisSystemPrompt,
   normalizeSynthesisOutput,
   runConsensusSynthesis,
+  readSynthesisEventLine,
   type SynthesisExecutionResult,
 } from "../src/synthesis.ts";
 
@@ -501,6 +502,25 @@ test("runConsensusSynthesis retries transient synthesis failures once before deg
 
   assert.equal(attemptCount, 2); // Initial + 1 retry
   assert.equal(result.output.consensusAnswer, "Use an incremental migration.");
+});
+
+test("readSynthesisEventLine captures assistant message_end text and ignores non-JSON/non-assistant events", () => {
+  assert.equal(readSynthesisEventLine("plain text line"), undefined);
+
+  assert.equal(
+    readSynthesisEventLine('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"first"},{"type":"text","text":" second"}]}}'),
+    "first second",
+  );
+
+  assert.equal(
+    readSynthesisEventLine('{"type":"tool_execution_start","toolName":"read"}'),
+    undefined,
+  );
+
+  assert.equal(
+    readSynthesisEventLine('{"type":"message_end","message":{"role":"user","content":"not assistant"}}'),
+    undefined,
+  );
 });
 
 test("runConsensusSynthesis does not retry non-transient synthesis failures", async () => {

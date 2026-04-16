@@ -7,6 +7,7 @@ import {
   filterParticipantOutputs,
   looksLikeNonEvaluativeResponse,
   runParticipantPass,
+  readParticipantEventLine,
 } from "../src/participants.ts";
 
 const config = {
@@ -734,6 +735,25 @@ test("runParticipantPass retries weak non-evaluative responses once with stricte
   assert.equal(result.participants[0]?.status, "completed");
   assert.equal(result.participants[0]?.retried, true);
   assert.equal(result.participants[0]?.retryReason, "non-evaluative response");
+});
+
+test("readParticipantEventLine captures tool usage and assistant message_end text while ignoring unrelated lines", () => {
+  assert.deepEqual(readParticipantEventLine("not json"), {});
+
+  assert.deepEqual(
+    readParticipantEventLine('{"type":"tool_execution_start","toolName":"read"}'),
+    { toolName: "read", assistantText: undefined },
+  );
+
+  assert.deepEqual(
+    readParticipantEventLine('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hello"},{"type":"tool_use","name":"read"},{"type":"text","text":" world"}]}}'),
+    { toolName: undefined, assistantText: "hello world" },
+  );
+
+  assert.deepEqual(
+    readParticipantEventLine('{"type":"message_end","message":{"role":"user","content":"ignore me"}}'),
+    { toolName: undefined, assistantText: undefined },
+  );
 });
 
 test("runParticipantPass excludes participant when retry still produces non-evaluative response", async () => {

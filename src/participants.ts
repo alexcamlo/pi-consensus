@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig, type Stance, type Focus } from "./config.ts";
+import {
+  parsePiJsonEventLine,
+  readToolExecutionStartName,
+  readAssistantTextFromMessageEndEvent,
+} from "./pi-json-events.ts";
 
 export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep"] as const;
 export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
@@ -451,20 +456,14 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
     if (stdout) {
       const reader = createInterface({ input: stdout, crlfDelay: Infinity });
       reader.on("line", (line) => {
-        const event = parseJsonLine(line);
-        if (!event || typeof event !== "object") {
-          return;
+        const eventData = readParticipantEventLine(line);
+
+        if (eventData.toolName) {
+          toolNamesUsed.add(eventData.toolName);
         }
 
-        if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
-          toolNamesUsed.add(event.toolName);
-        }
-
-        if (event.type === "message_end") {
-          const assistantText = extractAssistantText(event.message);
-          if (assistantText) {
-            lastAssistantText = assistantText;
-          }
+        if (eventData.assistantText) {
+          lastAssistantText = eventData.assistantText;
         }
       });
     }
@@ -537,6 +536,18 @@ export async function runParticipantInvocation(invocation: ParticipantInvocation
       });
     });
   });
+}
+
+export function readParticipantEventLine(line: string): { toolName?: string; assistantText?: string } {
+  const event = parsePiJsonEventLine(line);
+  if (!event) {
+    return {};
+  }
+
+  return {
+    toolName: readToolExecutionStartName(event),
+    assistantText: readAssistantTextFromMessageEndEvent(event),
+  };
 }
 
 export function buildParticipantCommand(invocation: ParticipantInvocation) {
@@ -680,52 +691,3 @@ function getBorderlineWarningReasons(output: string) {
   return [`missing structured sections: ${missingSections.map((section) => section.label).join(", ")}`];
 }
 
-function parseJsonLine(line: string): Record<string, unknown> | undefined {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("{")) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
-
-function extractAssistantText(message: unknown) {
-  if (!message || typeof message !== "object") {
-    return "";
-  }
-
-  const role = Reflect.get(message, "role");
-  if (role !== "assistant") {
-    return "";
-  }
-
-  const content = Reflect.get(message, "content");
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((block) => {
-      if (!block || typeof block !== "object") {
-        return "";
-      }
-
-      const type = Reflect.get(block, "type");
-      if (type !== "text") {
-        return "";
-      }
-
-      const text = Reflect.get(block, "text");
-      return typeof text === "string" ? text : "";
-    })
-    .join("")
-    .trim();
-}

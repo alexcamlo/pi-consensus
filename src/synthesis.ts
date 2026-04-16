@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
+import {
+  parsePiJsonEventLine,
+  readAssistantTextFromMessageEndEvent,
+} from "./pi-json-events.ts";
 import { isTransientFailure, type ExcludedParticipantResult, type FailedParticipantResult, type UsableParticipantResult } from "./participants.ts";
 
 export type ConsensusPoint = {
@@ -542,16 +546,9 @@ export async function runSynthesisInvocation(invocation: SynthesisInvocation): P
     if (stdout) {
       const reader = createInterface({ input: stdout, crlfDelay: Infinity });
       reader.on("line", (line) => {
-        const event = parseJsonLine(line);
-        if (!event || typeof event !== "object") {
-          return;
-        }
-
-        if (event.type === "message_end") {
-          const assistantText = extractAssistantText(event.message);
-          if (assistantText) {
-            lastAssistantText = assistantText;
-          }
+        const assistantText = readSynthesisEventLine(line);
+        if (assistantText) {
+          lastAssistantText = assistantText;
         }
       });
     }
@@ -598,6 +595,15 @@ export async function runSynthesisInvocation(invocation: SynthesisInvocation): P
       );
     });
   });
+}
+
+export function readSynthesisEventLine(line: string): string | undefined {
+  const event = parsePiJsonEventLine(line);
+  if (!event) {
+    return undefined;
+  }
+
+  return readAssistantTextFromMessageEndEvent(event);
 }
 
 export function validateSynthesisOutput(output: ConsensusSynthesisOutput) {
@@ -683,52 +689,3 @@ function formatErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function parseJsonLine(line: string): Record<string, unknown> | undefined {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("{")) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
-
-function extractAssistantText(message: unknown) {
-  if (!message || typeof message !== "object") {
-    return "";
-  }
-
-  const role = Reflect.get(message, "role");
-  if (role !== "assistant") {
-    return "";
-  }
-
-  const content = Reflect.get(message, "content");
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((block) => {
-      if (!block || typeof block !== "object") {
-        return "";
-      }
-
-      const type = Reflect.get(block, "type");
-      if (type !== "text") {
-        return "";
-      }
-
-      const text = Reflect.get(block, "text");
-      return typeof text === "string" ? text : "";
-    })
-    .join("")
-    .trim();
-}
