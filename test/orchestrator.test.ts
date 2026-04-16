@@ -83,6 +83,78 @@ test("ConsensusOrchestrator executes successful end-to-end run through its bound
   assert.ok(notifications.some((entry) => entry.level === "info" && entry.message === "pi-consensus participant pass and synthesis completed."));
 });
 
+test("ConsensusOrchestrator applies command-level stance/focus overrides through participant policy contract", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-orchestrator-overrides-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4-5", stance: "for", focus: "security" },
+        { provider: "openai", id: "gpt-5", stance: "against" },
+      ],
+    }),
+  );
+
+  const participantPolicies: Array<{ model: string; stance?: string; focus?: string; policyStance?: string; policyFocus?: string }> = [];
+
+  const orchestrator = createConsensusOrchestrator({
+    executeParticipantInvocation: async (invocation) => {
+      participantPolicies.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        stance: invocation.model.stance,
+        focus: invocation.model.focus,
+        policyStance: invocation.policy?.promptFraming.stance,
+        policyFocus: invocation.policy?.promptFraming.focus,
+      });
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: "Recommendation: proceed. Why: clear path. Risks/tradeoffs: moderate migration effort. Confidence: high. Repo evidence: src/index.ts owns command wiring.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      };
+    },
+    executeSynthesisInvocation: async (invocation) => ({
+      model: invocation.model,
+      output: {
+        consensusAnswer: "Proceed with an incremental migration.",
+        overallAgreementPercent: 70,
+        overallDisagreementPercent: 20,
+        overallUnclearPercent: 10,
+        confidencePercent: 80,
+        confidenceLabel: "high",
+        agreedPoints: [],
+        disagreements: [],
+        participants: [],
+        excludedParticipants: [],
+      },
+    }),
+  });
+
+  const outcome = await orchestrator.execute(
+    {
+      prompt: "plan the migration",
+      overrides: { stance: "neutral", focus: "maintainability" },
+    },
+    {
+      cwd: projectDir,
+      currentModel: { provider: "openai", id: "gpt-5" },
+      availableModels: [
+        { provider: "anthropic", id: "claude-sonnet-4-5" },
+        { provider: "openai", id: "gpt-5" },
+      ],
+    },
+  );
+
+  assert.equal(outcome.details.status, "synthesis-complete");
+  assert.deepEqual(participantPolicies.map((entry) => entry.stance), ["neutral", "neutral"]);
+  assert.deepEqual(participantPolicies.map((entry) => entry.focus), ["maintainability", "maintainability"]);
+  assert.deepEqual(participantPolicies.map((entry) => entry.policyStance), ["neutral", "neutral"]);
+  assert.deepEqual(participantPolicies.map((entry) => entry.policyFocus), ["maintainability", "maintainability"]);
+});
+
 test("ConsensusOrchestrator skips synthesis when usable participant minimum is not met", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-orchestrator-gate-"));
   mkdirSync(join(projectDir, ".pi"), { recursive: true });

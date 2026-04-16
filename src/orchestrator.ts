@@ -113,17 +113,6 @@ export function createConsensusOrchestrator(
           throw createConsensusStageError("config validation failed", error);
         }
 
-        if (request.overrides?.stance || request.overrides?.focus) {
-          config = {
-            ...config,
-            models: config.models.map((model) => ({
-              ...model,
-              ...(request.overrides?.stance ? { stance: request.overrides.stance } : {}),
-              ...(request.overrides?.focus ? { focus: request.overrides.focus } : {}),
-            })),
-          };
-        }
-
         state.selectedParticipants = config.models.map(formatModelRef);
         state.synthesisModel = formatModelRef(config.synthesisModel);
         for (const warning of config.warnings) {
@@ -152,6 +141,7 @@ export function createConsensusOrchestrator(
               prompt: request.prompt,
               cwd: ctx.cwd,
               config,
+              overrides: request.overrides,
             },
             createProgressParticipantExecutor(state, emit, deps.executeParticipantInvocation),
           );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildParticipantRunPolicy,
   createParticipantSystemPrompt,
   EARLY_STOP_FAILURE_REASON,
   filterParticipantOutputs,
@@ -22,6 +23,48 @@ const config = {
   participantMaxRetries: 1,
   warnings: [],
 };
+
+test("buildParticipantRunPolicy uses model defaults when command overrides are absent", () => {
+  const policy = buildParticipantRunPolicy({
+    model: { provider: "anthropic", id: "claude-sonnet-4-5", stance: "for", focus: "security" },
+    transientRetry: { attempt: 1, maxRetries: 1, isRetry: false },
+  });
+
+  assert.equal(policy.model.stance, "for");
+  assert.equal(policy.model.focus, "security");
+  assert.deepEqual(policy.allowedTools, ["read", "ls", "find", "grep"]);
+  assert.equal(policy.retry.transient.attempt, 1);
+  assert.equal(policy.retry.prompt.isRetry, false);
+  assert.match(policy.promptFraming.systemPrompt, /Stance: Supportive/);
+  assert.match(policy.promptFraming.systemPrompt, /Focus: Security/);
+});
+
+test("buildParticipantRunPolicy applies command-level stance/focus overrides", () => {
+  const policy = buildParticipantRunPolicy({
+    model: { provider: "anthropic", id: "claude-sonnet-4-5", stance: "for", focus: "security" },
+    overrides: { stance: "against", focus: "performance" },
+    transientRetry: { attempt: 1, maxRetries: 1, isRetry: false },
+  });
+
+  assert.equal(policy.model.stance, "against");
+  assert.equal(policy.model.focus, "performance");
+  assert.match(policy.promptFraming.systemPrompt, /Stance: Critical/);
+  assert.match(policy.promptFraming.systemPrompt, /Focus: Performance/);
+});
+
+test("buildParticipantRunPolicy carries retry metadata and retry prompt framing", () => {
+  const policy = buildParticipantRunPolicy({
+    model: { provider: "openai", id: "gpt-5" },
+    transientRetry: { attempt: 2, maxRetries: 1, isRetry: true },
+    promptRetry: { attempt: 2, maxAttempts: 2, reason: "non-evaluative response" },
+  });
+
+  assert.equal(policy.retry.transient.isRetry, true);
+  assert.equal(policy.retry.transient.attempt, 2);
+  assert.equal(policy.retry.prompt.isRetry, true);
+  assert.equal(policy.retry.prompt.reason, "non-evaluative response");
+  assert.match(policy.promptFraming.systemPrompt, /RETRY INSTRUCTIONS/i);
+});
 
 test("runParticipantPass executes participant invocations in parallel with subprocess-safe read-only settings", async () => {
   let concurrent = 0;
@@ -134,6 +177,41 @@ test("runParticipantPass passes stance and focus through to participant system p
   assert.match(invocations[1].systemPrompt, /Stance: Critical/);
   assert.doesNotMatch(invocations[1].systemPrompt, /Focus:/);
   assert.match(invocations[1].systemPrompt, /Truthfulness guardrail/);
+});
+
+test("runParticipantPass resolves command-level overrides through participant policy builder", async () => {
+  const invocations: Array<{ model: string; stance?: string; focus?: string; systemPrompt: string }> = [];
+
+  await runParticipantPass(
+    {
+      prompt: "evaluate this authentication approach",
+      cwd: "/tmp/project",
+      config,
+      overrides: { stance: "neutral", focus: "maintainability" },
+    },
+    async (invocation) => {
+      invocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        stance: invocation.model.stance,
+        focus: invocation.model.focus,
+        systemPrompt: invocation.systemPrompt,
+      });
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: "Recommendation: proceed. Why: manageable complexity. Risks/tradeoffs: medium. Confidence: medium.",
+        inspectedRepo: false,
+        toolNamesUsed: [],
+      };
+    },
+  );
+
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations.map((entry) => entry.stance), ["neutral", "neutral"]);
+  assert.deepEqual(invocations.map((entry) => entry.focus), ["maintainability", "maintainability"]);
+  assert.match(invocations[0].systemPrompt, /Stance: Neutral/);
+  assert.match(invocations[0].systemPrompt, /Focus: Maintainability/);
 });
 
 test("createParticipantSystemPrompt only advertises subprocess-safe participant tools", () => {
@@ -469,6 +547,7 @@ test("runParticipantPass respects bounded concurrency configuration", async () =
 
 test("runParticipantPass retries transient failures once and succeeds on retry", async () => {
   const attemptsByModel = new Map<string, number>();
+  const transientRetryAttempts: number[] = [];
   const configWithRetry = {
     ...config,
     participantMaxRetries: 1,
@@ -484,6 +563,10 @@ test("runParticipantPass retries transient failures once and succeeds on retry",
       const modelKey = `${invocation.model.provider}/${invocation.model.id}`;
       const currentAttempt = (attemptsByModel.get(modelKey) ?? 0) + 1;
       attemptsByModel.set(modelKey, currentAttempt);
+
+      if (modelKey === "anthropic/claude-sonnet-4-5") {
+        transientRetryAttempts.push(invocation.policy?.retry.transient.attempt ?? 0);
+      }
 
       // First model: first attempt fails with transient error, retry succeeds
       if (modelKey === "anthropic/claude-sonnet-4-5" && currentAttempt === 1) {
@@ -511,6 +594,7 @@ test("runParticipantPass retries transient failures once and succeeds on retry",
   // openai model: 1 attempt (succeed immediately)
   assert.equal(attemptsByModel.get("anthropic/claude-sonnet-4-5"), 2, "anthropic model should be retried once");
   assert.equal(attemptsByModel.get("openai/gpt-5"), 1, "openai model should not need retry");
+  assert.deepEqual(transientRetryAttempts, [1, 2]);
   assert.equal(result.participants[0]?.status, "completed");
   assert.equal(result.participants[1]?.status, "completed");
 });
@@ -686,6 +770,7 @@ test("filterParticipantOutputs marks borderline responses as usable-with-warning
 
 test("runParticipantPass retries weak non-evaluative responses once with stricter prompt", async () => {
   let attemptCount = 0;
+  const promptRetryAttempts: number[] = [];
   const configWithRetry = {
     configPath: ".pi/consensus.json",
     configSource: "project" as const,
@@ -704,11 +789,13 @@ test("runParticipantPass retries weak non-evaluative responses once with stricte
     },
     async (invocation) => {
       attemptCount++;
+      promptRetryAttempts.push(invocation.policy?.retry.prompt.attempt ?? 0);
 
       // First attempt: non-evaluative response
       if (attemptCount === 1) {
         // Verify first attempt uses standard prompt
         assert.doesNotMatch(invocation.systemPrompt, /RETRY INSTRUCTIONS/i);
+        assert.equal(invocation.policy?.retry.prompt.isRetry, false);
         return {
           model: invocation.model,
           status: "completed" as const,
@@ -720,6 +807,8 @@ test("runParticipantPass retries weak non-evaluative responses once with stricte
 
       // Retry attempt: verify stricter prompt and return usable response
       assert.match(invocation.systemPrompt, /RETRY INSTRUCTIONS/i);
+      assert.equal(invocation.policy?.retry.prompt.isRetry, true);
+      assert.equal(invocation.policy?.retry.prompt.reason, "non-evaluative response");
       return {
         model: invocation.model,
         status: "completed" as const,
@@ -735,6 +824,7 @@ test("runParticipantPass retries weak non-evaluative responses once with stricte
   assert.equal(result.participants[0]?.status, "completed");
   assert.equal(result.participants[0]?.retried, true);
   assert.equal(result.participants[0]?.retryReason, "non-evaluative response");
+  assert.deepEqual(promptRetryAttempts, [1, 2]);
 });
 
 test("readParticipantEventLine captures tool usage and assistant message_end text while ignoring unrelated lines", () => {

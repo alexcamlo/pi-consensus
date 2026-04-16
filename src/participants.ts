@@ -22,6 +22,7 @@ export type ParticipantInvocation = {
   piCommand?: string;
   env?: NodeJS.ProcessEnv;
   abortSignal?: AbortSignal;
+  policy?: ParticipantRunPolicy;
 };
 
 export type ParticipantExecutionResult = {
@@ -45,10 +46,76 @@ export type ParticipantRetryInfo = {
   isRetry: boolean;
 };
 
+export type ParticipantRunOverrides = {
+  stance?: Stance;
+  focus?: Focus;
+};
+
+export type ParticipantRunPolicy = {
+  model: ConsensusModelRef;
+  allowedTools: string[];
+  promptFraming: {
+    stance?: Stance;
+    focus?: Focus;
+    isRetryPrompt: boolean;
+    systemPrompt: string;
+  };
+  retry: {
+    transient: ParticipantRetryInfo;
+    prompt: {
+      attempt: number;
+      maxAttempts: number;
+      isRetry: boolean;
+      reason?: string;
+    };
+  };
+};
+
 export type ParticipantInvocationExecutorWithRetry = (
   invocation: ParticipantInvocation,
   retryInfo: ParticipantRetryInfo,
 ) => Promise<ParticipantExecutionResult>;
+
+export function buildParticipantRunPolicy(options: {
+  model: ConsensusModelRef;
+  overrides?: ParticipantRunOverrides;
+  transientRetry: ParticipantRetryInfo;
+  promptRetry?: {
+    attempt: number;
+    maxAttempts: number;
+    reason?: string;
+  };
+}): ParticipantRunPolicy {
+  const stance = options.overrides?.stance ?? options.model.stance;
+  const focus = options.overrides?.focus ?? options.model.focus;
+  const promptAttempt = options.promptRetry?.attempt ?? 1;
+  const promptMaxAttempts = options.promptRetry?.maxAttempts ?? 1;
+  const isRetryPrompt = promptAttempt > 1;
+
+  return {
+    model: {
+      ...options.model,
+      ...(stance ? { stance } : {}),
+      ...(focus ? { focus } : {}),
+    },
+    allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS],
+    promptFraming: {
+      ...(stance ? { stance } : {}),
+      ...(focus ? { focus } : {}),
+      isRetryPrompt,
+      systemPrompt: createParticipantSystemPrompt(stance, focus, isRetryPrompt),
+    },
+    retry: {
+      transient: options.transientRetry,
+      prompt: {
+        attempt: promptAttempt,
+        maxAttempts: promptMaxAttempts,
+        isRetry: isRetryPrompt,
+        reason: options.promptRetry?.reason,
+      },
+    },
+  };
+}
 
 export type ParticipantPassResult = {
   participants: ParticipantExecutionResult[];
@@ -137,10 +204,11 @@ export async function runParticipantPass(
     prompt: string;
     cwd: string;
     config: ResolvedConsensusConfig;
+    overrides?: ParticipantRunOverrides;
   },
   executeParticipantInvocation: ParticipantInvocationExecutor = runParticipantInvocation,
 ): Promise<ParticipantPassResult> {
-  const { prompt, cwd, config } = options;
+  const { prompt, cwd, config, overrides } = options;
   const concurrency = config.participantConcurrency;
   const maxRetries = config.participantMaxRetries;
 
@@ -212,19 +280,25 @@ export async function runParticipantPass(
       }
 
       const baseInvocation = {
-        model,
         cwd,
         prompt,
-        allowedTools: [...SUBPROCESS_SAFE_PARTICIPANT_TOOLS] as string[],
         thinking: config.participantThinking,
         timeoutMs: config.participantTimeoutMs,
         abortSignal: abortControllers[index].signal,
       };
 
-      // First attempt with standard prompt
+      const firstPolicy = buildParticipantRunPolicy({
+        model,
+        overrides,
+        transientRetry: { attempt: 1, maxRetries, isRetry: false },
+      });
+
       const firstInvocation: ParticipantInvocation = {
         ...baseInvocation,
-        systemPrompt: createParticipantSystemPrompt(model.stance, model.focus, false),
+        model: firstPolicy.model,
+        allowedTools: firstPolicy.allowedTools,
+        systemPrompt: firstPolicy.promptFraming.systemPrompt,
+        policy: firstPolicy,
       };
 
       const firstResult = await executeWithRetry(firstInvocation);
@@ -235,10 +309,23 @@ export async function runParticipantPass(
         firstResult.output &&
         looksLikeNonEvaluativeResponse(firstResult.output)
       ) {
-        // Retry once with stricter prompt
+        const retryPolicy = buildParticipantRunPolicy({
+          model,
+          overrides,
+          transientRetry: { attempt: 1, maxRetries, isRetry: false },
+          promptRetry: {
+            attempt: 2,
+            maxAttempts: 2,
+            reason: "non-evaluative response",
+          },
+        });
+
         const retryInvocation: ParticipantInvocation = {
           ...baseInvocation,
-          systemPrompt: createParticipantSystemPrompt(model.stance, model.focus, true),
+          model: retryPolicy.model,
+          allowedTools: retryPolicy.allowedTools,
+          systemPrompt: retryPolicy.promptFraming.systemPrompt,
+          policy: retryPolicy,
         };
 
         const retryResult = await executeWithRetry(retryInvocation);
@@ -288,7 +375,24 @@ function createRetryExecutor(
     let lastResult: ParticipantExecutionResult | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const result = await executeParticipantInvocation(invocation);
+      const invocationForAttempt: ParticipantInvocation = invocation.policy
+        ? {
+            ...invocation,
+            policy: {
+              ...invocation.policy,
+              retry: {
+                ...invocation.policy.retry,
+                transient: {
+                  attempt: attempt + 1,
+                  maxRetries,
+                  isRetry: attempt > 0,
+                },
+              },
+            },
+          }
+        : invocation;
+
+      const result = await executeParticipantInvocation(invocationForAttempt);
 
       // If completed successfully, return immediately
       if (result.status === "completed") {
