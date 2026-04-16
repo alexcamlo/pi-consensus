@@ -59,6 +59,55 @@ test("createConsensusExecutionResult returns formatted consensus text with debug
   assert.ok(result.details.nextSteps.length >= 2);
 });
 
+test("createConsensusExecutionResult includes raw synthesis output in details and markdown debug section", () => {
+  const rawSynthesisOutputText = '{"consensusAnswer":"Use staged rollout","overallAgreementPercent":"70"}';
+
+  const result = createConsensusExecutionResult(
+    "plan migration",
+    {
+      configPath: ".pi/consensus.json",
+      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+      synthesisModel: "openai/gpt-5",
+      warnings: [],
+    },
+    [
+      {
+        model: "anthropic/claude-sonnet-4-5",
+        status: "usable",
+        output: "Recommendation: staged rollout.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      },
+      {
+        model: "openai/gpt-5",
+        status: "usable",
+        output: "Recommendation: phased rollout.",
+        inspectedRepo: true,
+        toolNamesUsed: ["read"],
+      },
+    ],
+    undefined,
+    {
+      consensusAnswer: "Use staged rollout.",
+      overallAgreementPercent: 70,
+      overallDisagreementPercent: 20,
+      overallUnclearPercent: 10,
+      confidencePercent: 75,
+      confidenceLabel: "medium",
+      agreedPoints: [],
+      disagreements: [],
+      participants: [],
+      excludedParticipants: [],
+    },
+    "repaired",
+    rawSynthesisOutputText,
+  );
+
+  assert.equal(result.details.rawSynthesisOutputText, rawSynthesisOutputText);
+  assert.match(result.text, /## Debug synthesis output/m);
+  assert.match(result.text, /\{"consensusAnswer":"Use staged rollout","overallAgreementPercent":"70"\}/);
+});
+
 test("consensus command relays through a hidden assistant tool-call message when idle", async () => {
   const harness = createExtensionHarness();
   consensusExtension(harness.pi as never);
@@ -604,6 +653,10 @@ test("consensus tool reports synthesis output validation failures clearly when s
   assert.ok(result);
   assert.equal(result?.details.synthesis?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
   assert.equal(result?.details.status, "synthesis-complete");
+  assert.equal(
+    result?.details.rawSynthesisOutputText,
+    '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":"two","totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}',
+  );
 
   assert.deepEqual(commandContext.notifications, [
     {

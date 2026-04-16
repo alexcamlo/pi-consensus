@@ -243,6 +243,7 @@ async function executeConsensusWorkflow(
       filteredParticipants.failureMessage,
       synthesis?.output,
       synthesisStatus,
+      synthesis?.rawOutputText,
     );
 
     if (!filteredParticipants.failureMessage) {
