@@ -4,6 +4,10 @@
 
 !`gh issue list --state open --json number,title,body,labels --limit 100`
 
+## Ready-for-agent issues
+
+!`gh issue list --state open --label ready-for-agent --json number,title,body,labels --limit 100`
+
 ## Recent RALPH commits (last 10)
 
 !`git log --oneline --grep="RALPH" -10`
@@ -21,11 +25,15 @@ Work on issues in this order:
 3. **Polish** — improving existing functionality (error messages, UX, docs)
 4. **Refactors** — internal cleanups with no user-visible change
 
-Treat all open issues as actionable by default, except issues that are clearly meta/planning-only, design-only, parent/tracker issues, or explicitly human-owned.
+Use **ready-for-agent issues** as the authoritative work queue.
+If one or more open issues have the `ready-for-agent` label, you must choose only from those issues.
+If any unblocked `ready-for-agent` issue exists, you must work on one of them and must not emit the completion signal.
+Only emit the completion signal when there are no unblocked `ready-for-agent` issues left.
+
+Treat unlabeled open issues as background context only unless there are zero open `ready-for-agent` issues.
+If there are zero open `ready-for-agent` issues, then fall back to evaluating all open issues and treat only concrete leaf implementation issues as actionable. Skip issues that are clearly meta/planning-only, design-only, parent/tracker issues, or explicitly human-owned.
 
 Prefer **leaf implementation issues** over PRDs, RFCs, umbrella issues, and trackers.
-If any unblocked leaf implementation issue exists, you must work on one of those issues and must not emit the completion signal.
-Only emit the completion signal when there are no unblocked implementation issues left and all remaining open issues are either blocked, HITL, PRD/RFC/parent/tracking-only, or otherwise non-actionable.
 
 Skip any issue with one of these labels:
 - `meta`
@@ -48,7 +56,7 @@ When evaluating whether an issue is actionable, use this rule:
 - If the issue mainly defines direction, architecture, decomposition, or future work, treat it as non-actionable for this run.
 - If the issue defines a concrete buildable slice with acceptance criteria, treat it as actionable unless blocked.
 
-Pick the highest-priority remaining open issue that is not blocked by another open issue.
+Pick the highest-priority remaining `ready-for-agent` issue that is not blocked by another open issue. If there are no open `ready-for-agent` issues, pick the highest-priority remaining actionable open issue that is not blocked by another open issue.
 
 ## Workflow
 
