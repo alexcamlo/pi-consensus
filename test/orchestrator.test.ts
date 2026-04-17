@@ -220,3 +220,41 @@ test("ConsensusOrchestrator skips synthesis when usable participant minimum is n
   assert.ok(progressEvents.some((event) => event.stage === "pre-synthesis-gate"));
   assert.ok(progressEvents.some((event) => event.synthesis === "skipped"));
 });
+
+test("ConsensusOrchestrator emits failed progress stage and error notification when a stage fails", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-orchestrator-failed-stage-"));
+
+  const progressEvents: ConsensusRunProgress[] = [];
+  const notifications: Array<{ message: string; level?: "info" | "warning" | "error" }> = [];
+
+  const orchestrator = createConsensusOrchestrator();
+
+  await assert.rejects(
+    orchestrator.execute(
+      { prompt: "plan the migration" },
+      {
+        cwd: projectDir,
+        currentModel: { provider: "openai", id: "gpt-5" },
+        availableModels: [
+          { provider: "anthropic", id: "claude-sonnet-4-5" },
+          { provider: "openai", id: "gpt-5" },
+        ],
+      },
+      {
+        onProgress: (event) => {
+          progressEvents.push(event);
+        },
+        notify: (message, level) => {
+          notifications.push({ message, level });
+        },
+      },
+    ),
+    /Config validation failed: Consensus config not found\./,
+  );
+
+  const failedEvent = [...progressEvents].reverse().find((event) => event.stage === "failed");
+  assert.ok(failedEvent);
+  assert.match(failedEvent?.failureMessage ?? "", /Config validation failed: Consensus config not found\./);
+  assert.equal(notifications.at(-1)?.level, "error");
+  assert.match(notifications.at(-1)?.message ?? "", /Config validation failed: Consensus config not found\./);
+});
