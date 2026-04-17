@@ -139,15 +139,3 @@ Not published yet.
 /consensus --focus security Review this auth design for likely risks.
 ```
 
-## Automation (Sandcastle)
-
-This repo includes an optional automation runner at `.sandcastle/main.mts` (`npm run sandcastle`).
-
-Current behavior:
-
-- uses `.sandcastle/prompt.md`
-- processes one issue per iteration with a `ready-for-agent`-first queue
-- runs in a docker-backed sandbox and merges back to head via `branchStrategy: merge-to-head`
-- installs dependencies in `onSandboxReady`
-
-This automation is for repository maintenance workflows and is separate from end-user `/consensus` usage inside pi.
