@@ -6,6 +6,7 @@ import {
   createSynthesisSystemPrompt,
   normalizeSynthesisOutput,
   runConsensusSynthesis,
+  runSynthesisInvocation,
   readSynthesisEventLine,
   type SynthesisInvocationResult,
 } from "../src/synthesis.ts";
@@ -522,6 +523,43 @@ test("readSynthesisEventLine captures assistant message_end text and ignores non
     readSynthesisEventLine('{"type":"message_end","message":{"role":"user","content":"not assistant"}}'),
     undefined,
   );
+});
+
+test("runSynthesisInvocation maps shared runner output into parsed synthesis JSON", async () => {
+  const result = await runSynthesisInvocation(
+    {
+      model: { provider: "openai", id: "gpt-5" },
+      cwd: "/tmp/project",
+      prompt: "prompt",
+      systemPrompt: "system",
+      allowedTools: [],
+    },
+    async (request) => {
+      assert.match(request.args.join(" "), /--mode json/);
+      return {
+        assistantText: JSON.stringify({
+          consensusAnswer: "Use incremental migration.",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 80,
+          confidenceLabel: "high",
+          agreedPoints: [],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        }),
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+      };
+    },
+  );
+
+  assert.equal(result.output.consensusAnswer, "Use incremental migration.");
+  assert.equal(result.rawOutputText?.includes("consensusAnswer"), true);
 });
 
 test("runConsensusSynthesis does not retry non-transient synthesis failures", async () => {

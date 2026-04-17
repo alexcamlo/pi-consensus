@@ -7,6 +7,7 @@ import {
   EARLY_STOP_FAILURE_REASON,
   filterParticipantOutputs,
   looksLikeNonEvaluativeResponse,
+  runParticipantInvocation,
   runParticipantPass,
   readParticipantEventLine,
 } from "../src/participants.ts";
@@ -844,6 +845,40 @@ test("readParticipantEventLine captures tool usage and assistant message_end tex
     readParticipantEventLine('{"type":"message_end","message":{"role":"user","content":"ignore me"}}'),
     { toolName: undefined, assistantText: undefined },
   );
+});
+
+test("runParticipantInvocation maps shared runner output into participant success with tool usage", async () => {
+  const invocation = {
+    model: { provider: "openai", id: "gpt-5" },
+    cwd: "/tmp/project",
+    prompt: "evaluate this proposal",
+    systemPrompt: "system",
+    allowedTools: ["read", "find"],
+  } as const;
+
+  const captured: Array<{ command?: string; args: string[] }> = [];
+
+  const result = await runParticipantInvocation(invocation, async (request) => {
+    captured.push({ command: request.command, args: request.args });
+    request.onEvent?.({ type: "tool_execution_start", toolName: "read" });
+
+    return {
+      assistantText: "Recommendation: proceed.",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+    };
+  });
+
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]?.command, undefined);
+  assert.match(captured[0]?.args.join(" ") ?? "", /--mode json/);
+  assert.equal(result.status, "completed");
+  assert.equal(result.output, "Recommendation: proceed.");
+  assert.deepEqual(result.toolNamesUsed, ["read"]);
+  assert.equal(result.inspectedRepo, true);
 });
 
 test("runParticipantPass excludes participant when retry still produces non-evaluative response", async () => {

@@ -1,12 +1,10 @@
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
-
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig, type Stance, type Focus } from "./config.ts";
 import {
   parsePiJsonEventLine,
   readToolExecutionStartName,
   readAssistantTextFromMessageEndEvent,
 } from "./pi-json-events.ts";
+import { runPiInvocation, type PiInvocationRunner } from "./invocation-runner.ts";
 
 export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep"] as const;
 export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
@@ -499,147 +497,89 @@ export function createParticipantSystemPrompt(stance?: Stance, focus?: Focus, is
   return sections.join("\n");
 }
 
-export async function runParticipantInvocation(invocation: ParticipantInvocation): Promise<ParticipantExecutionResult> {
-  return new Promise((resolve) => {
-    const command = invocation.piCommand ?? "pi";
-    const args = buildParticipantCommand(invocation);
-    const child = spawn(command, args, {
+export async function runParticipantInvocation(
+  invocation: ParticipantInvocation,
+  runner: PiInvocationRunner = runPiInvocation,
+): Promise<ParticipantExecutionResult> {
+  const toolNamesUsed = new Set<string>();
+
+  try {
+    const processResult = await runner({
+      command: invocation.piCommand,
+      args: buildParticipantCommand(invocation),
       cwd: invocation.cwd,
       env: invocation.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      timeoutMs: invocation.timeoutMs,
+      abortSignal: invocation.abortSignal,
+      onEvent: (event) => {
+        const toolName = readToolExecutionStartName(event);
+        if (toolName) {
+          toolNamesUsed.add(toolName);
+        }
+      },
     });
 
-    let settled = false;
-    const finish = (result: ParticipantExecutionResult) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      invocation.abortSignal?.removeEventListener("abort", onAbort);
-      resolve(result);
-    };
+    const toolNames = [...toolNamesUsed];
 
-    let lastAssistantText = "";
-    let stderr = "";
-    let timedOut = false;
-    const toolNamesUsed = new Set<string>();
-
-    const timeout = invocation.timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGKILL");
-        }, invocation.timeoutMs)
-      : undefined;
-
-    const onAbort = () => {
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!settled) {
-          child.kill("SIGKILL");
-        }
-      }, 50).unref();
-    };
-
-    if (invocation.abortSignal) {
-      if (invocation.abortSignal.aborted) {
-        finish({
-          model: invocation.model,
-          status: "failed",
-          failureReason: typeof invocation.abortSignal.reason === "string" ? invocation.abortSignal.reason : EARLY_STOP_FAILURE_REASON,
-          inspectedRepo: false,
-          toolNamesUsed: [],
-        });
-        return;
-      }
-
-      invocation.abortSignal.addEventListener("abort", onAbort, { once: true });
-    }
-
-    const stdout = child.stdout;
-    if (stdout) {
-      const reader = createInterface({ input: stdout, crlfDelay: Infinity });
-      reader.on("line", (line) => {
-        const eventData = readParticipantEventLine(line);
-
-        if (eventData.toolName) {
-          toolNamesUsed.add(eventData.toolName);
-        }
-
-        if (eventData.assistantText) {
-          lastAssistantText = eventData.assistantText;
-        }
-      });
-    }
-
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.on("error", (error) => {
-      finish({
+    if (processResult.timedOut) {
+      return {
         model: invocation.model,
         status: "failed",
-        failureReason: error.message,
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      });
-    });
-
-    child.on("close", (code, signal) => {
-      const toolNames = [...toolNamesUsed];
-      if (timedOut) {
-        finish({
-          model: invocation.model,
-          status: "failed",
-          failureReason: `participant subprocess timed out after ${invocation.timeoutMs}ms`,
-          inspectedRepo: toolNames.length > 0,
-          toolNamesUsed: toolNames,
-        });
-        return;
-      }
-
-      if (invocation.abortSignal?.aborted) {
-        finish({
-          model: invocation.model,
-          status: "failed",
-          failureReason:
-            typeof invocation.abortSignal.reason === "string" ? invocation.abortSignal.reason : EARLY_STOP_FAILURE_REASON,
-          inspectedRepo: toolNames.length > 0,
-          toolNamesUsed: toolNames,
-        });
-        return;
-      }
-
-      if (code === 0 && lastAssistantText.trim().length > 0) {
-        finish({
-          model: invocation.model,
-          status: "completed",
-          output: lastAssistantText.trim(),
-          inspectedRepo: toolNames.length > 0,
-          toolNamesUsed: toolNames,
-        });
-        return;
-      }
-
-      const failureReason = [
-        code !== 0 ? `participant subprocess exited with code ${code}${signal ? ` (${signal})` : ""}` : undefined,
-        stderr.trim() || undefined,
-        !lastAssistantText.trim() ? "participant produced no assistant output" : undefined,
-      ]
-        .filter(Boolean)
-        .join(": ");
-
-      finish({
-        model: invocation.model,
-        status: "failed",
-        failureReason: failureReason || "participant subprocess failed",
+        failureReason: `participant subprocess timed out after ${invocation.timeoutMs}ms`,
         inspectedRepo: toolNames.length > 0,
         toolNamesUsed: toolNames,
-      });
-    });
-  });
+      };
+    }
+
+    if (processResult.aborted) {
+      return {
+        model: invocation.model,
+        status: "failed",
+        failureReason:
+          typeof processResult.abortReason === "string" ? processResult.abortReason : EARLY_STOP_FAILURE_REASON,
+        inspectedRepo: toolNames.length > 0,
+        toolNamesUsed: toolNames,
+      };
+    }
+
+    const assistantText = processResult.assistantText.trim();
+
+    if (processResult.exitCode === 0 && assistantText.length > 0) {
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: assistantText,
+        inspectedRepo: toolNames.length > 0,
+        toolNamesUsed: toolNames,
+      };
+    }
+
+    const failureReason = [
+      processResult.exitCode !== 0
+        ? `participant subprocess exited with code ${processResult.exitCode}${processResult.signal ? ` (${processResult.signal})` : ""}`
+        : undefined,
+      processResult.stderr.trim() || undefined,
+      !assistantText ? "participant produced no assistant output" : undefined,
+    ]
+      .filter(Boolean)
+      .join(": ");
+
+    return {
+      model: invocation.model,
+      status: "failed",
+      failureReason: failureReason || "participant subprocess failed",
+      inspectedRepo: toolNames.length > 0,
+      toolNamesUsed: toolNames,
+    };
+  } catch (error) {
+    return {
+      model: invocation.model,
+      status: "failed",
+      failureReason: error instanceof Error ? error.message : String(error),
+      inspectedRepo: false,
+      toolNamesUsed: [],
+    };
+  }
 }
 
 export function readParticipantEventLine(line: string): { toolName?: string; assistantText?: string } {

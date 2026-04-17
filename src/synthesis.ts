@@ -1,11 +1,9 @@
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
-
 import { formatModelRef, type ConsensusModelRef, type ResolvedConsensusConfig } from "./config.ts";
 import {
   parsePiJsonEventLine,
   readAssistantTextFromMessageEndEvent,
 } from "./pi-json-events.ts";
+import { runPiInvocation, type PiInvocationRunner } from "./invocation-runner.ts";
 import { isTransientFailure, type ExcludedParticipantResult, type FailedParticipantResult, type UsableParticipantResult } from "./participants.ts";
 
 export type ConsensusPoint = {
@@ -516,10 +514,13 @@ export function createSynthesisRepairSystemPrompt() {
   ].join(" ");
 }
 
-export async function runSynthesisInvocation(invocation: SynthesisInvocation): Promise<SynthesisInvocationResult> {
-  return new Promise((resolve, reject) => {
-    const command = invocation.piCommand ?? "pi";
-    const args = [
+export async function runSynthesisInvocation(
+  invocation: SynthesisInvocation,
+  runner: PiInvocationRunner = runPiInvocation,
+): Promise<SynthesisInvocationResult> {
+  const processResult = await runner({
+    command: invocation.piCommand,
+    args: [
       "--mode",
       "json",
       "--model",
@@ -534,78 +535,34 @@ export async function runSynthesisInvocation(invocation: SynthesisInvocation): P
       "--no-skills",
       "--no-prompt-templates",
       invocation.prompt,
-    ];
-
-    const child = spawn(command, args, {
-      cwd: invocation.cwd,
-      env: invocation.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let lastAssistantText = "";
-    let stderr = "";
-    let timedOut = false;
-
-    const timeout = invocation.timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGKILL");
-        }, invocation.timeoutMs)
-      : undefined;
-
-    const stdout = child.stdout;
-    if (stdout) {
-      const reader = createInterface({ input: stdout, crlfDelay: Infinity });
-      reader.on("line", (line) => {
-        const assistantText = readSynthesisEventLine(line);
-        if (assistantText) {
-          lastAssistantText = assistantText;
-        }
-      });
-    }
-
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.on("error", (error) => {
-      if (timeout) clearTimeout(timeout);
-      reject(error);
-    });
-
-    child.on("close", (code, signal) => {
-      if (timeout) clearTimeout(timeout);
-
-      if (timedOut) {
-        reject(new Error(`synthesis subprocess timed out after ${invocation.timeoutMs}ms`));
-        return;
-      }
-
-      if (code === 0 && lastAssistantText.trim()) {
-        try {
-          const output = JSON.parse(lastAssistantText) as ConsensusSynthesisOutput;
-          resolve({ model: invocation.model, output, rawOutputText: lastAssistantText });
-          return;
-        } catch (error) {
-          reject(error);
-          return;
-        }
-      }
-
-      reject(
-        new Error(
-          [
-            code !== 0 ? `synthesis subprocess exited with code ${code}${signal ? ` (${signal})` : ""}` : undefined,
-            stderr.trim() || undefined,
-            !lastAssistantText.trim() ? "synthesis produced no assistant output" : undefined,
-          ]
-            .filter(Boolean)
-            .join(": ") || "synthesis subprocess failed",
-        ),
-      );
-    });
+    ],
+    cwd: invocation.cwd,
+    env: invocation.env,
+    timeoutMs: invocation.timeoutMs,
   });
+
+  if (processResult.timedOut) {
+    throw new Error(`synthesis subprocess timed out after ${invocation.timeoutMs}ms`);
+  }
+
+  const assistantText = processResult.assistantText.trim();
+
+  if (processResult.exitCode === 0 && assistantText) {
+    const output = JSON.parse(assistantText) as ConsensusSynthesisOutput;
+    return { model: invocation.model, output, rawOutputText: assistantText };
+  }
+
+  throw new Error(
+    [
+      processResult.exitCode !== 0
+        ? `synthesis subprocess exited with code ${processResult.exitCode}${processResult.signal ? ` (${processResult.signal})` : ""}`
+        : undefined,
+      processResult.stderr.trim() || undefined,
+      !assistantText ? "synthesis produced no assistant output" : undefined,
+    ]
+      .filter(Boolean)
+      .join(": ") || "synthesis subprocess failed",
+  );
 }
 
 export function readSynthesisEventLine(line: string): string | undefined {
