@@ -61,7 +61,7 @@ export type SynthesisInvocationResult = {
 
 export type SynthesisExecutionResult =
   | {
-      status: "full" | "repaired";
+      status: "complete";
       model: ConsensusModelRef;
       output: ConsensusSynthesisOutput;
       rawOutputText?: string;
@@ -310,13 +310,12 @@ export async function runConsensusSynthesis(
   hooks.onResponseReceived?.();
   hooks.onValidationStarted?.();
 
-  // Try normalization first (handles extraction, coercion, arrays)
+  // Try normalization first (handles extraction, coercion, arrays).
+  // Internal normalization variants are collapsed behind one stable caller-visible outcome.
   const normalized = normalizeSynthesisOutput(result.rawOutputText ?? JSON.stringify(result.output));
   if (normalized.status !== "unrecoverable") {
-    // Internal normalization variants (full/extracted/normalized) are intentionally
-    // collapsed into a single caller-visible full synthesis outcome.
     return {
-      status: "full",
+      status: "complete",
       model: result.model,
       output: normalized.output,
       rawOutputText: result.rawOutputText,
@@ -327,7 +326,7 @@ export async function runConsensusSynthesis(
   let validationError: InvalidConsensusSynthesisOutputError | undefined;
   try {
     validateSynthesisOutput(result.output);
-    return { ...result, status: "full" };
+    return { ...result, status: "complete" };
   } catch (error) {
     if (error instanceof InvalidConsensusSynthesisOutputError) {
       validationError = error;
@@ -363,14 +362,14 @@ export async function runConsensusSynthesis(
       model: repairedResult.model,
       output: repairedNormalized.output,
       rawOutputText: repairedResult.rawOutputText,
-      status: "repaired",
+      status: "complete",
     };
   }
 
   // Try validation on repaired output
   try {
     validateSynthesisOutput(repairedResult.output);
-    return { ...repairedResult, status: "repaired" };
+    return { ...repairedResult, status: "complete" };
   } catch {
     // Repair validation failed - degrade gracefully
     hooks.onDegraded?.();

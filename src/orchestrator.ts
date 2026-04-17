@@ -164,7 +164,7 @@ export function createConsensusOrchestrator(
         );
 
         let synthesis;
-        let synthesisStatus: "full" | "repaired" | "degraded" | undefined;
+        let synthesisStatus: "complete" | "degraded" | undefined;
         if (filteredParticipants.failureMessage) {
           state.synthesis = "skipped";
           emit("Skipping synthesis because the minimum usable participant count was not reached.");

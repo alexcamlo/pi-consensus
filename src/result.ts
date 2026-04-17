@@ -35,7 +35,7 @@ export type ConsensusExecutionResult = {
     failedParticipantCount: number;
     failureMessage?: string;
     synthesis?: ConsensusSynthesisOutput;
-    synthesisStatus?: "full" | "repaired" | "degraded";
+    synthesisStatus?: "complete" | "degraded";
     rawSynthesisOutputText?: string;
     nextSteps: string[];
   };
@@ -47,7 +47,7 @@ export function createConsensusExecutionResult(
   participants: ParticipantExecutionSummary[],
   failureMessage?: string,
   synthesis?: ConsensusSynthesisOutput,
-  synthesisStatus?: "full" | "repaired" | "degraded",
+  synthesisStatus?: "complete" | "degraded",
   rawSynthesisOutputText?: string,
 ): ConsensusExecutionResult {
   const usableParticipantCount = participants.filter(

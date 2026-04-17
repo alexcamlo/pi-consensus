@@ -111,7 +111,7 @@ test("runConsensusSynthesis uses the configured synthesis model and passes full 
     },
   );
 
-  assert.equal(result.status, "full");
+  assert.equal(result.status, "complete");
   assert.equal(result.model.provider, "openai");
   assert.equal(result.output.consensusAnswer, "Use an incremental migration.");
   assert.equal(invocations.length, 1);
@@ -231,7 +231,7 @@ test("runConsensusSynthesis retries once with a repair prompt when validation fa
   );
 
   assert.equal(result.output.agreedPoints[0]?.supportingParticipants, 2);
-  assert.equal(result.status, "repaired");
+  assert.equal(result.status, "complete");
   assert.equal(invocations.length, 2);
   assert.match(invocations[1]?.prompt ?? "", /Validation error:\nConsensus synthesis output field "agreedPoints\[\]\.supportingParticipants" must be a non-negative integer\./);
   assert.match(invocations[1]?.prompt ?? "", /Original invalid JSON:/);

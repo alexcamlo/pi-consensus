@@ -94,7 +94,7 @@ test("createConsensusExecutionResult includes raw synthesis output in details an
       participants: [],
       excludedParticipants: [],
     },
-    "repaired",
+    "complete",
     rawSynthesisOutputText,
   );
 
@@ -203,7 +203,7 @@ test("createConsensusExecutionResult renders participant stance and focus in out
       ],
       excludedParticipants: [{ model: "google/gemini-2.5-pro", reason: "empty response" }],
     },
-    "full",
+    "complete", 
   );
 
   assert.match(result.text, /anthropic\/claude-sonnet-4-5 \(stance: for, focus: security\) — Recommended JWT/);
