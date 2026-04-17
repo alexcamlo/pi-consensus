@@ -5,6 +5,13 @@ import {
   readAssistantTextFromMessageEndEvent,
 } from "./pi-json-events.ts";
 import { runPiInvocation, type PiInvocationRunner } from "./invocation-runner.ts";
+import {
+  classifyParticipantQuality,
+  isUsableParticipantQualityStatus,
+  looksLikeNonEvaluativeResponse,
+  type ParticipantQualityClassification,
+  type ParticipantQualityDiagnostic,
+} from "./participant-quality.ts";
 
 export const PARTICIPANT_TOOL_CANDIDATES = ["read", "ls", "find", "grep"] as const;
 export const SUBPROCESS_SAFE_PARTICIPANT_TOOLS = ["read", "ls", "find", "grep"] as const;
@@ -121,18 +128,8 @@ export type ParticipantPassResult = {
   earlyStopReason?: string;
 };
 
-export type FilteredParticipantResult = {
-  model: ConsensusModelRef;
-  status: "usable" | "usable-with-warning" | "excluded" | "failed";
-  output?: string;
-  failureReason?: string;
-  exclusionReason?: string;
-  warningReasons?: string[];
-  inspectedRepo: boolean;
-  toolNamesUsed: string[];
-  retried?: boolean;
-  retryReason?: string;
-};
+export type FilteredParticipantResult = ParticipantQualityClassification;
+export type { ParticipantQualityDiagnostic };
 
 export type UsableParticipantResult = FilteredParticipantResult & { status: "usable" | "usable-with-warning"; output: string };
 export type ExcludedParticipantResult = FilteredParticipantResult & { status: "excluded" };
@@ -168,34 +165,11 @@ const TRANSIENT_FAILURE_PATTERNS = [
   /exited with code \d+.*\n?.*(?:no assistant output|empty)/i,
 ] as const;
 
-// Patterns that indicate a response is asking for more context instead of evaluating
-const NON_EVALUATIVE_PATTERNS = [
-  /need more information/i,
-  /need(s)? more context/i,
-  /cannot evaluate without more context/i,
-  /can't evaluate without more context/i,
-  /insufficient information/i,
-  /insufficient context/i,
-  /would need to inspect more of the codebase/i,
-  /would need to see more of the codebase/i,
-  /depends on details not provided/i,
-  /missing (the )?necessary (details|context|information)/i,
-  /unable to (provide a recommendation|make a recommendation|evaluate)/i,
-  /cannot (provide a recommendation|make a recommendation|evaluate) without/i,
-  /more information (would be|is) needed/i,
-  /request for more information/i,
-  /requires more context/i,
-  /not enough (information|context|details)/i,
-] as const;
-
 export function isTransientFailure(failureReason: string): boolean {
   return TRANSIENT_FAILURE_PATTERNS.some((pattern) => pattern.test(failureReason));
 }
 
-export function looksLikeNonEvaluativeResponse(output: string): boolean {
-  const normalized = output.replace(/\s+/g, " ").trim();
-  return NON_EVALUATIVE_PATTERNS.some((pattern) => pattern.test(normalized));
-}
+export { looksLikeNonEvaluativeResponse };
 
 export async function runParticipantPass(
   options: {
@@ -336,12 +310,12 @@ export async function runParticipantPass(
         };
 
         participants[index] = resultWithRetryInfo;
-        if (isUsableClassification(classifyParticipantOutput(retryResult))) {
+        if (isUsableParticipantQualityStatus(classifyParticipantQuality(retryResult).status)) {
           usableCount += 1;
         }
       } else {
         participants[index] = firstResult;
-        if (isUsableClassification(classifyParticipantOutput(firstResult))) {
+        if (isUsableParticipantQualityStatus(classifyParticipantQuality(firstResult).status)) {
           usableCount += 1;
         }
       }
@@ -417,7 +391,7 @@ export function filterParticipantOutputs(
   participants: ParticipantExecutionResult[],
   options: { stoppedEarly?: boolean; earlyStopReason?: string } = {},
 ): ParticipantFilteringResult {
-  const filteredParticipants = participants.map(classifyParticipantOutput);
+  const filteredParticipants = participants.map(classifyParticipantQuality);
   const usable = filteredParticipants.filter(isUsableParticipant);
   const excluded = filteredParticipants.filter(isExcludedParticipant);
   const failed = filteredParticipants.filter(isFailedParticipant);
@@ -617,121 +591,11 @@ function isUsableParticipant(participant: FilteredParticipantResult): participan
   return participant.status === "usable" || participant.status === "usable-with-warning";
 }
 
-function isUsableClassification(participant: FilteredParticipantResult) {
-  return participant.status === "usable" || participant.status === "usable-with-warning";
-}
-
 function isExcludedParticipant(participant: FilteredParticipantResult): participant is ExcludedParticipantResult {
   return participant.status === "excluded";
 }
 
 function isFailedParticipant(participant: FilteredParticipantResult): participant is FailedParticipantResult {
   return participant.status === "failed";
-}
-
-function classifyParticipantOutput(participant: ParticipantExecutionResult): FilteredParticipantResult {
-  if (participant.status === "failed") {
-    return {
-      ...participant,
-      status: "failed",
-    };
-  }
-
-  const output = participant.output?.trim() ?? "";
-  if (!output) {
-    return {
-      ...participant,
-      status: "excluded",
-      output,
-      exclusionReason: "empty response",
-    };
-  }
-
-  if (looksLikeRefusalOnly(output)) {
-    return {
-      ...participant,
-      status: "excluded",
-      output,
-      exclusionReason: "refusal-only response",
-    };
-  }
-
-  if (looksTooVague(output)) {
-    return {
-      ...participant,
-      status: "excluded",
-      output,
-      exclusionReason: "response was too vague to use for consensus",
-    };
-  }
-
-  // Check for non-evaluative responses that ask for more context instead of evaluating
-  // If this was a retry and still produces non-evaluative output, exclude it
-  if (looksLikeNonEvaluativeResponse(output)) {
-    return {
-      ...participant,
-      status: "excluded",
-      output,
-      exclusionReason: participant.retried
-        ? "non-evaluative response after retry"
-        : "non-evaluative response asking for more context",
-    };
-  }
-
-  const warningReasons = getBorderlineWarningReasons(output);
-  if (warningReasons.length > 0) {
-    return {
-      ...participant,
-      status: "usable-with-warning",
-      output,
-      warningReasons,
-    };
-  }
-
-  return {
-    ...participant,
-    status: "usable",
-    output,
-  };
-}
-
-function looksLikeRefusalOnly(output: string) {
-  const normalized = output.replace(/\s+/g, " ").trim().toLowerCase();
-  if (normalized.length > 220) {
-    return false;
-  }
-
-  return [
-    /^(i('|’)m sorry[, ]+but )?i can('|’)t help with that request[.!]?$/,
-    /^(i('|’)m sorry[, ]+but )?i cannot help with that request[.!]?$/,
-    /^(i('|’)m sorry[, ]+but )?i can('|’)t assist with that[.!]?$/,
-    /^(i('|’)m sorry[, ]+but )?i cannot comply with that request[.!]?$/,
-    /^(i('|’)m sorry[, ]+but )?i don('|’)t have enough information to answer[.!]?$/,
-  ].some((pattern) => pattern.test(normalized));
-}
-
-function looksTooVague(output: string) {
-  const normalized = output.replace(/\s+/g, " ").trim();
-  if (normalized.length >= 40) {
-    return false;
-  }
-
-  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-  return wordCount <= 6;
-}
-
-function getBorderlineWarningReasons(output: string) {
-  const missingSections = [
-    { label: "why", pattern: /\bwhy\s*:/i },
-    { label: "risks/tradeoffs", pattern: /\brisks?\s*\/\s*tradeoffs?\s*:/i },
-    { label: "confidence", pattern: /\bconfidence\s*:/i },
-    { label: "repo evidence", pattern: /\brepo evidence\s*:/i },
-  ].filter((section) => !section.pattern.test(output));
-
-  if (missingSections.length === 0) {
-    return [];
-  }
-
-  return [`missing structured sections: ${missingSections.map((section) => section.label).join(", ")}`];
 }
 

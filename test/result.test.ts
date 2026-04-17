@@ -118,6 +118,13 @@ test("createConsensusExecutionResult surfaces warning-bearing usable participant
         status: "usable-with-warning",
         output: "Recommendation: proceed incrementally.",
         warningReasons: ["missing structured sections: why, risks/tradeoffs, confidence, repo evidence"],
+        surfacedDiagnostics: [
+          {
+            code: "missing-structured-sections",
+            message: "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
+            severity: "warning",
+          },
+        ],
         inspectedRepo: true,
         toolNamesUsed: ["read"],
       },
@@ -139,6 +146,7 @@ test("createConsensusExecutionResult surfaces warning-bearing usable participant
   ]);
   assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable-with-warning/);
   assert.match(result.text, /Warnings: missing structured sections: why, risks\/tradeoffs, confidence, repo evidence/);
+  assert.match(result.text, /Diagnostics: warning:missing-structured-sections \(missing structured sections: why, risks\/tradeoffs, confidence, repo evidence\)/);
 });
 
 test("createConsensusExecutionResult renders participant stance and focus in output", () => {

@@ -766,6 +766,13 @@ test("filterParticipantOutputs marks borderline responses as usable-with-warning
   assert.deepEqual(filtered.usable[0]?.warningReasons, [
     "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
   ]);
+  assert.deepEqual(filtered.usable[0]?.surfacedDiagnostics, [
+    {
+      code: "missing-structured-sections",
+      message: "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
+      severity: "warning",
+    },
+  ]);
   assert.equal(filtered.failureMessage, undefined);
 });
 

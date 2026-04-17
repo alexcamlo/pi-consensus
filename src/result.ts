@@ -15,6 +15,7 @@ type ParticipantExecutionSummary = {
   failureReason?: string;
   exclusionReason?: string;
   warningReasons?: string[];
+  surfacedDiagnostics?: Array<{ code: string; message: string; severity: "warning" | "error" }>;
   inspectedRepo: boolean;
   toolNamesUsed: string[];
   stance?: Stance;
@@ -164,6 +165,13 @@ function renderParticipantSummary(participant: ParticipantExecutionSummary) {
     ...(participant.status === "excluded" ? [`- Reason: ${participant.exclusionReason ?? "excluded from consensus"}`] : []),
     ...(participant.status === "usable-with-warning"
       ? [`- Warnings: ${participant.warningReasons?.length ? participant.warningReasons.join(" | ") : "borderline but still usable"}`]
+      : []),
+    ...(participant.surfacedDiagnostics?.length
+      ? [
+          `- Diagnostics: ${participant.surfacedDiagnostics
+            .map((diagnostic) => `${diagnostic.severity}:${diagnostic.code} (${diagnostic.message})`)
+            .join(" | ")}`,
+        ]
       : []),
     `- Repo inspection: ${participant.inspectedRepo ? "yes" : "no"}`,
     `- Tools used: ${participant.toolNamesUsed.length === 0 ? "none" : participant.toolNamesUsed.join(", ")}`,

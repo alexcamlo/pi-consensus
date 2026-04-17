@@ -4,6 +4,7 @@ import {
   runParticipantInvocation,
   runParticipantPass,
   type ParticipantInvocationExecutor,
+  type ParticipantQualityDiagnostic,
 } from "./participants.ts";
 import { createConsensusExecutionResult } from "./result.ts";
 import {
@@ -327,6 +328,7 @@ function toParticipantSummary(participant: {
   failureReason?: string;
   exclusionReason?: string;
   warningReasons?: string[];
+  surfacedDiagnostics?: ParticipantQualityDiagnostic[];
   inspectedRepo: boolean;
   toolNamesUsed: string[];
   retried?: boolean;
@@ -339,6 +341,7 @@ function toParticipantSummary(participant: {
     failureReason: participant.failureReason,
     exclusionReason: participant.exclusionReason,
     warningReasons: participant.warningReasons,
+    surfacedDiagnostics: participant.surfacedDiagnostics,
     inspectedRepo: participant.inspectedRepo,
     toolNamesUsed: participant.toolNamesUsed,
     stance: participant.model.stance,
