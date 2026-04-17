@@ -258,3 +258,130 @@ test("ConsensusOrchestrator emits failed progress stage and error notification w
   assert.equal(notifications.at(-1)?.level, "error");
   assert.match(notifications.at(-1)?.message ?? "", /Config validation failed: Consensus config not found\./);
 });
+
+test("ConsensusOrchestrator returns degraded synthesis outcome while preserving successful workflow semantics", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-orchestrator-degraded-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const progressEvents: ConsensusRunProgress[] = [];
+  let synthesisAttempts = 0;
+
+  const orchestrator = createConsensusOrchestrator({
+    executeParticipantInvocation: async (invocation) => ({
+      model: invocation.model,
+      status: "completed",
+      output: "Recommendation: proceed. Why: clear path. Risks/tradeoffs: moderate migration effort. Confidence: high.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    }),
+    executeSynthesisInvocation: async (invocation) => {
+      synthesisAttempts += 1;
+      return {
+        model: invocation.model,
+        rawOutputText:
+          '{"consensusAnswer":"Use incremental rollout","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Start with low-risk services","supportPercent":100,"supportingParticipants":"two","totalParticipants":2}],"disagreements":[],"participants":[],"excludedParticipants":[]}',
+        output: {
+          consensusAnswer: "Use incremental rollout",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 80,
+          confidenceLabel: "medium",
+          agreedPoints: [
+            {
+              point: "Start with low-risk services",
+              supportPercent: 100,
+              supportingParticipants: "two" as unknown as number,
+              totalParticipants: 2,
+            },
+          ],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        },
+      };
+    },
+  });
+
+  const outcome = await orchestrator.execute(
+    { prompt: "plan the migration" },
+    {
+      cwd: projectDir,
+      currentModel: { provider: "openai", id: "gpt-5" },
+      availableModels: [
+        { provider: "anthropic", id: "claude-sonnet-4-5" },
+        { provider: "openai", id: "gpt-5" },
+      ],
+    },
+    {
+      onProgress: (event) => {
+        progressEvents.push(event);
+      },
+    },
+  );
+
+  assert.equal(synthesisAttempts, 2);
+  assert.equal(outcome.details.status, "synthesis-complete");
+  assert.equal(outcome.details.synthesis?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
+  assert.ok(progressEvents.some((event) => event.stage === "synthesis" && event.synthesis === "degraded"));
+});
+
+test("ConsensusOrchestrator maps synthesis stage failures into stable workflow errors", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-orchestrator-synthesis-failure-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const progressEvents: ConsensusRunProgress[] = [];
+  const notifications: Array<{ message: string; level?: "info" | "warning" | "error" }> = [];
+
+  const orchestrator = createConsensusOrchestrator({
+    executeParticipantInvocation: async (invocation) => ({
+      model: invocation.model,
+      status: "completed",
+      output: "Recommendation: proceed. Why: clear path. Risks/tradeoffs: moderate migration effort. Confidence: high.",
+      inspectedRepo: true,
+      toolNamesUsed: ["read"],
+    }),
+    executeSynthesisInvocation: async () => {
+      throw new Error("synthesis subprocess exited with code 1");
+    },
+  });
+
+  await assert.rejects(
+    orchestrator.execute(
+      { prompt: "plan the migration" },
+      {
+        cwd: projectDir,
+        currentModel: { provider: "openai", id: "gpt-5" },
+        availableModels: [
+          { provider: "anthropic", id: "claude-sonnet-4-5" },
+          { provider: "openai", id: "gpt-5" },
+        ],
+      },
+      {
+        onProgress: (event) => {
+          progressEvents.push(event);
+        },
+        notify: (message, level) => {
+          notifications.push({ message, level });
+        },
+      },
+    ),
+    /Synthesis subprocess failed: synthesis subprocess exited with code 1/,
+  );
+
+  assert.ok(progressEvents.some((event) => event.stage === "failed" && event.synthesis === "failed"));
+  assert.equal(notifications.at(-1)?.level, "error");
+  assert.match(notifications.at(-1)?.message ?? "", /Synthesis subprocess failed: synthesis subprocess exited with code 1/);
+});

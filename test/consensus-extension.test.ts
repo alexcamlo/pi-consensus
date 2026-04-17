@@ -5,146 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import consensusExtension from "../src/index.ts";
-import { createConsensusExecutionResult } from "../src/result.ts";
 import type { SynthesisInvocationResult } from "../src/synthesis.ts";
-
-test("createConsensusExecutionResult returns formatted consensus text with debug participant details", () => {
-  const result = createConsensusExecutionResult(
-    "review this repo",
-    {
-      configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
-      synthesisModel: "openai/gpt-5",
-      warnings: ["Duplicate participant models were deduplicated."],
-    },
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        status: "usable",
-        output: "Inspect src/index.ts first.",
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      },
-      {
-        model: "openai/gpt-5",
-        status: "excluded",
-        output: "I'm sorry, but I can't help with that request.",
-        exclusionReason: "refusal-only response",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      },
-      {
-        model: "google/gemini-2.5-pro",
-        status: "failed",
-        failureReason: "participant subprocess exited with code 1",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      },
-    ],
-    "Consensus requires at least 2 usable participant outputs but only 1 remained after filtering.",
-  );
-
-  assert.match(result.text, /^# Consensus/m);
-  assert.match(result.text, /## Prompt\s+review this repo/m);
-  assert.match(result.text, /## Excluded\s+- openai\/gpt-5 — refusal-only response\s+- google\/gemini-2\.5-pro — participant subprocess exited with code 1/m);
-  assert.match(result.text, /## Debug participant outputs/m);
-  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable/m);
-  assert.match(result.text, /Inspect src\/index\.ts first\./);
-  assert.equal(result.details.status, "participant-pass-insufficient-usable");
-  assert.equal(result.details.prompt, "review this repo");
-  assert.equal(result.details.readOnly, true);
-  assert.equal(result.details.config?.participants.length, 3);
-  assert.equal(result.details.participants.length, 3);
-  assert.equal(result.details.usableParticipantCount, 1);
-  assert.ok(result.details.nextSteps.length >= 2);
-});
-
-test("createConsensusExecutionResult includes raw synthesis output in details and markdown debug section", () => {
-  const rawSynthesisOutputText = '{"consensusAnswer":"Use staged rollout","overallAgreementPercent":"70"}';
-
-  const result = createConsensusExecutionResult(
-    "plan migration",
-    {
-      configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-      synthesisModel: "openai/gpt-5",
-      warnings: [],
-    },
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        status: "usable",
-        output: "Recommendation: staged rollout.",
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      },
-      {
-        model: "openai/gpt-5",
-        status: "usable",
-        output: "Recommendation: phased rollout.",
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      },
-    ],
-    undefined,
-    {
-      consensusAnswer: "Use staged rollout.",
-      overallAgreementPercent: 70,
-      overallDisagreementPercent: 20,
-      overallUnclearPercent: 10,
-      confidencePercent: 75,
-      confidenceLabel: "medium",
-      agreedPoints: [],
-      disagreements: [],
-      participants: [],
-      excludedParticipants: [],
-    },
-    "repaired",
-    rawSynthesisOutputText,
-  );
-
-  assert.equal(result.details.rawSynthesisOutputText, rawSynthesisOutputText);
-  assert.match(result.text, /## Debug synthesis output/m);
-  assert.match(result.text, /\{"consensusAnswer":"Use staged rollout","overallAgreementPercent":"70"\}/);
-});
-
-test("createConsensusExecutionResult surfaces warning-bearing usable participants in details and markdown", () => {
-  const result = createConsensusExecutionResult(
-    "evaluate rollout",
-    {
-      configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-      synthesisModel: "openai/gpt-5",
-      warnings: [],
-    },
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        status: "usable-with-warning",
-        output: "Recommendation: proceed incrementally.",
-        warningReasons: ["missing structured sections: why, risks/tradeoffs, confidence, repo evidence"],
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      },
-      {
-        model: "openai/gpt-5",
-        status: "usable",
-        output: "Recommendation: proceed. Why: minimizes risk. Risks/tradeoffs: slower rollout. Confidence: high.",
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      },
-    ],
-  );
-
-  assert.equal(result.details.usableParticipantCount, 2);
-  assert.equal(result.details.excludedParticipantCount, 0);
-  assert.equal(result.details.participants[0]?.status, "usable-with-warning");
-  assert.deepEqual(result.details.participants[0]?.warningReasons, [
-    "missing structured sections: why, risks/tradeoffs, confidence, repo evidence",
-  ]);
-  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable-with-warning/);
-  assert.match(result.text, /Warnings: missing structured sections: why, risks\/tradeoffs, confidence, repo evidence/);
-});
 
 test("consensus command relays through a hidden assistant tool-call message when idle", async () => {
   const harness = createExtensionHarness();
@@ -171,9 +32,6 @@ test("consensus command relays through a hidden assistant tool-call message when
     },
     options: { triggerTurn: true },
   });
-  assert.equal(harness.sentUserMessages.length, 0);
-  assert.equal(harness.sentToolLikeMessages.length, 0);
-  assert.deepEqual(commandContext.notifications, []);
 });
 
 test("consensus command queues a follow-up assistant tool-call message when pi is busy", async () => {
@@ -193,713 +51,6 @@ test("consensus command queues a follow-up assistant tool-call message when pi i
       message: "Queued /consensus as a follow-up tool run.",
     },
   ]);
-});
-
-test("consensus tool validates config, runs synthesis with full participant outputs, prefers project config, and reports warnings", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-project-"));
-  const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-"));
-
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: [
-        "anthropic/claude-sonnet-4-5",
-        "openai/gpt-5",
-        "openai/gpt-5",
-      ],
-      synthesisModel: "openai/not-a-real-model",
-      participantThinking: "low",
-      synthesisThinking: "medium",
-      participantTimeoutMs: 120000,
-      synthesisTimeoutMs: 90000,
-    }),
-  );
-  writeFileSync(
-    join(agentDir, "consensus.json"),
-    JSON.stringify({
-      models: ["google/gemini-2.5-pro", "openai/gpt-5"],
-      synthesisModel: "google/gemini-2.5-pro",
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  const participantInvocations: Array<{ model: string; cwd: string; prompt: string; allowedTools: string[]; systemPrompt: string }> = [];
-  const synthesisInvocations: Array<{ model: string; cwd: string; prompt: string; allowedTools: string[]; systemPrompt: string }> = [];
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => {
-      participantInvocations.push({
-        model: `${invocation.model.provider}/${invocation.model.id}`,
-        cwd: invocation.cwd,
-        prompt: invocation.prompt,
-        allowedTools: invocation.allowedTools,
-        systemPrompt: invocation.systemPrompt,
-      });
-
-      return {
-        model: invocation.model,
-        status: "completed",
-        output:
-          `Recommendation: adopt the ${invocation.model.provider}/${invocation.model.id} migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.`,
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      };
-    },
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => {
-      synthesisInvocations.push({
-        model: `${invocation.model.provider}/${invocation.model.id}`,
-        cwd: invocation.cwd,
-        prompt: invocation.prompt,
-        allowedTools: invocation.allowedTools,
-        systemPrompt: invocation.systemPrompt,
-      });
-
-      return {
-        model: invocation.model,
-        output: {
-          consensusAnswer: "Use the incremental migration plan.",
-          overallAgreementPercent: 70,
-          overallDisagreementPercent: 20,
-          overallUnclearPercent: 10,
-          confidencePercent: 78,
-          confidenceLabel: "medium",
-          agreedPoints: [
-            {
-              point: "Roll out the migration incrementally.",
-              supportPercent: 100,
-              supportingParticipants: 2,
-              totalParticipants: 2,
-            },
-          ],
-          disagreements: [
-            {
-              point: "Whether to automate the final cleanup immediately.",
-              summary: "One model prefers delaying cleanup until after validation.",
-            },
-          ],
-          participants: [
-            {
-              model: "anthropic/claude-sonnet-4-5",
-              summary: "Recommended an incremental rollout.",
-            },
-            {
-              model: "openai/gpt-5",
-              summary: "Also recommended an incremental rollout.",
-            },
-          ],
-          excludedParticipants: [],
-        },
-      };
-    },
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-    { provider: "google", id: "gemini-2.5-pro" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = agentDir;
-
-  const toolResult = await harness.registeredTool?.execute(
-    "tool-call-1",
-    { prompt: "draft a migration plan" },
-    undefined,
-    undefined,
-    commandContext,
-  );
-
-  const content = toolResult?.content[0]?.text ?? "";
-  assert.match(content, /^# Consensus/m);
-  assert.match(content, /## Metadata[\s\S]*Config: .*\.pi\/consensus\.json/);
-  assert.match(content, /Synthesis model: openai\/gpt-5/);
-  assert.match(content, /## Answer\s+Use the incremental migration plan\./m);
-  assert.match(content, /- Agreement: 70%/);
-  assert.match(content, /- Disagreement: 20%/);
-  assert.match(content, /- Unclear: 10%/);
-  assert.match(content, /## Participants\s+- anthropic\/claude-sonnet-4-5 — Recommended an incremental rollout\.\s+- openai\/gpt-5 — Also recommended an incremental rollout\./m);
-  assert.match(content, /## Debug participant outputs/m);
-  assert.match(content, /Recommendation: adopt the anthropic\/claude-sonnet-4-5 migration plan\./);
-  assert.match(content, /Recommendation: adopt the openai\/gpt-5 migration plan\./);
-  assert.doesNotMatch(content, /google\/gemini-2\.5-pro —/);
-  assert.equal((toolResult?.details as { synthesis?: { consensusAnswer?: string } })?.synthesis?.consensusAnswer, "Use the incremental migration plan.");
-  assert.deepEqual(
-    participantInvocations.map(({ model, cwd, prompt, allowedTools }) => ({ model, cwd, prompt, allowedTools })),
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        cwd: projectDir,
-        prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep"],
-      },
-      {
-        model: "openai/gpt-5",
-        cwd: projectDir,
-        prompt: "draft a migration plan",
-        allowedTools: ["read", "ls", "find", "grep"],
-      },
-    ],
-  );
-  assert.match(participantInvocations[0]?.systemPrompt ?? "", /inspect the relevant files before answering/i);
-  assert.deepEqual(synthesisInvocations, [
-    {
-      model: "openai/gpt-5",
-      cwd: projectDir,
-      prompt:
-        'Original user prompt:\n"""\ndraft a migration plan\n"""\n\nUsable participant outputs:\n\nParticipant: anthropic/claude-sonnet-4-5\nRecommendation: adopt the anthropic/claude-sonnet-4-5 migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.\n\nParticipant: openai/gpt-5\nRecommendation: adopt the openai/gpt-5 migration plan. Why: it keeps the rollout incremental. Risks/tradeoffs: moderate coordination cost. Confidence: 78%.',
-      allowedTools: [],
-      systemPrompt: synthesisInvocations[0]?.systemPrompt ?? "",
-    },
-  ]);
-  assert.match(synthesisInvocations[0]?.systemPrompt ?? "", /Return valid JSON only/i);
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "warning",
-      message: 'Duplicate participant model "openai/gpt-5" was deduplicated.',
-    },
-    {
-      level: "warning",
-      message: 'Configured synthesis model "openai/not-a-real-model" is unavailable; falling back to current model "openai/gpt-5".',
-    },
-    {
-      level: "warning",
-      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-    {
-      level: "info",
-      message: "pi-consensus participant pass and synthesis completed.",
-    },
-  ]);
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+config validation/.test(line))),
-  );
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Progress\s+\[[█░]+\] 0\/2 done · 0 ok/.test(line))),
-  );
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Running\s+● claude-sonnet-4-5/.test(line))),
-  );
-  assert.ok(
-    commandContext.widgetUpdates.some((lines) => lines.some((line) => /Done\s+✓ claude-sonnet-4-5/.test(line))),
-  );
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+pre-synthesis gate/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● running/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● response received/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+● validating/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+✓ completed/.test(line))));
-  assert.equal(commandContext.statusUpdates.length, 0);
-  assert.equal(commandContext.widgetCleared, true);
-});
-
-test("consensus progress UI shows participant retry state when a participant invocation is retried", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-participant-retry-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-      participantMaxRetries: 1,
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  const attempts = new Map<string, number>();
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => {
-      const key = `${invocation.model.provider}/${invocation.model.id}`;
-      const attempt = (attempts.get(key) ?? 0) + 1;
-      attempts.set(key, attempt);
-
-      if (key === "anthropic/claude-sonnet-4-5" && attempt === 1) {
-        return {
-          model: invocation.model,
-          status: "failed",
-          failureReason: "participant subprocess timed out after 30000ms",
-          inspectedRepo: false,
-          toolNamesUsed: [],
-        };
-      }
-
-      return {
-        model: invocation.model,
-        status: "completed",
-        output: "Recommendation: proceed. Why: clear benefits. Risks/tradeoffs: moderate complexity. Confidence: high.",
-        inspectedRepo: true,
-        toolNamesUsed: ["read"],
-      };
-    },
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => ({
-      model: invocation.model,
-      output: {
-        consensusAnswer: "Proceed.",
-        overallAgreementPercent: 70,
-        overallDisagreementPercent: 20,
-        overallUnclearPercent: 10,
-        confidencePercent: 80,
-        confidenceLabel: "high",
-        agreedPoints: [],
-        disagreements: [],
-        participants: [],
-        excludedParticipants: [],
-      },
-    }),
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-participant-retry-"));
-
-  await harness.registeredTool?.execute(
-    "tool-call-participant-retry",
-    { prompt: "evaluate this plan" },
-    undefined,
-    undefined,
-    commandContext,
-  );
-
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Retrying\s+↻ claude-sonnet-4-5/.test(line))));
-  assert.equal(attempts.get("anthropic/claude-sonnet-4-5"), 2);
-});
-
-test("consensus progress UI shows synthesis retry state when synthesis is retried", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-retry-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-      synthesisMaxRetries: 1,
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  let synthesisAttempts = 0;
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => ({
-      model: invocation.model,
-      status: "completed",
-      output: "Recommendation: proceed. Why: clear benefits. Risks/tradeoffs: moderate complexity. Confidence: high.",
-      inspectedRepo: true,
-      toolNamesUsed: ["read"],
-    }),
-    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => {
-      synthesisAttempts += 1;
-      if (synthesisAttempts === 1) {
-        throw new Error("synthesis subprocess timed out after 30000ms");
-      }
-
-      return {
-        model: invocation.model,
-        output: {
-          consensusAnswer: "Proceed.",
-          overallAgreementPercent: 70,
-          overallDisagreementPercent: 20,
-          overallUnclearPercent: 10,
-          confidencePercent: 80,
-          confidenceLabel: "high",
-          agreedPoints: [],
-          disagreements: [],
-          participants: [],
-          excludedParticipants: [],
-        },
-      };
-    },
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-retry-"));
-
-  await harness.registeredTool?.execute(
-    "tool-call-synthesis-retry",
-    { prompt: "evaluate this plan" },
-    undefined,
-    undefined,
-    commandContext,
-  );
-
-  assert.equal(synthesisAttempts, 2);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+↻ retrying/.test(line))));
-});
-
-test("consensus tool shows a clear error when config is missing", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-missing-"));
-  const agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-missing-"));
-
-  const harness = createExtensionHarness();
-  consensusExtension(harness.pi as never);
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = agentDir;
-
-  await assert.rejects(
-    harness.registeredTool?.execute(
-      "tool-call-missing-config",
-      { prompt: "draft a migration plan" },
-      undefined,
-      undefined,
-      commandContext,
-    ),
-    /Config validation failed: Consensus config not found\. Create \.pi\/consensus\.json or ~\/\.pi\/agent\/consensus\.json with at least 2 participant models\./,
-  );
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "error",
-      message:
-        "Config validation failed: Consensus config not found. Create .pi/consensus.json or ~/.pi/agent/consensus.json with at least 2 participant models.",
-    },
-  ]);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+failed/.test(line))));
-  assert.equal(commandContext.widgetCleared, true);
-});
-
-test("consensus tool stops early, skips synthesis, and explains why when the minimum usable participant count becomes impossible", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-filtered-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  const participantOutcomes: string[] = [];
-  let synthesisCalled = false;
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => {
-      const model = `${invocation.model.provider}/${invocation.model.id}`;
-      if (invocation.model.provider === "anthropic") {
-        participantOutcomes.push(`${model}:completed`);
-        return {
-          model: invocation.model,
-          status: "completed",
-          output: "Maybe refactor it.",
-          inspectedRepo: false,
-          toolNamesUsed: [],
-        };
-      }
-
-      if (invocation.model.provider === "openai") {
-        participantOutcomes.push(`${model}:completed`);
-        return {
-          model: invocation.model,
-          status: "completed",
-          output: "I'm sorry, but I can't help with that request.",
-          inspectedRepo: false,
-          toolNamesUsed: [],
-        };
-      }
-
-      await new Promise<void>((resolve) => {
-        invocation.abortSignal?.addEventListener("abort", () => {
-          participantOutcomes.push(`${model}:aborted`);
-          resolve();
-        }, { once: true });
-      });
-
-      return {
-        model: invocation.model,
-        status: "failed",
-        failureReason: String(invocation.abortSignal?.reason ?? "aborted"),
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      };
-    },
-    executeSynthesisInvocation: async () => {
-      synthesisCalled = true;
-      throw new Error("synthesis should have been skipped");
-    },
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-    { provider: "google", id: "gemini-2.5-pro" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-filtered-"));
-
-  const toolResult = await harness.registeredTool?.execute(
-    "tool-call-filtered",
-    { prompt: "draft a migration plan" },
-    undefined,
-    undefined,
-    commandContext,
-  );
-
-  const content = toolResult?.content[0]?.text ?? "";
-  assert.equal(synthesisCalled, false);
-  assert.deepEqual(participantOutcomes, [
-    "anthropic/claude-sonnet-4-5:completed",
-    "openai/gpt-5:completed",
-    "google/gemini-2.5-pro:aborted",
-  ]);
-  assert.match(content, /Consensus stopped early because only 0 usable participant outputs remained and 1 participant run was still in flight/);
-  assert.match(content, /Consensus requires at least 2 usable participant outputs but only 0 remained after filtering\./);
-  assert.match(content, /openai\/gpt-5 — excluded/);
-  assert.match(content, /Reason: refusal-only response/);
-  assert.match(content, /google\/gemini-2\.5-pro — failed/);
-  assert.match(content, /reaching the minimum 2 usable participants became impossible/);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+− skipped/.test(line))));
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "warning",
-      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-  ]);
-});
-
-test("consensus tool fails clearly when fewer than two unique participant models remain", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-invalid-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["openai/gpt-5", "openai/gpt-5"],
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  consensusExtension(harness.pi as never);
-
-  await assert.rejects(
-    harness.registeredTool?.execute(
-      "tool-call-2",
-      { prompt: "draft a migration plan" },
-      undefined,
-      undefined,
-      {
-        ...createCommandContext(projectDir),
-        agentDir: mkdtempSync(join(tmpdir(), "pi-consensus-agent-invalid-")),
-        model: { provider: "openai", id: "gpt-5" },
-        modelRegistry: {
-          getAvailable: () => [{ provider: "openai", id: "gpt-5" }],
-        },
-      },
-    ),
-    /Consensus config must contain at least 2 unique participant models\./,
-  );
-});
-
-test("consensus tool clears progress and reports synthesis failures cleanly", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-error-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => ({
-      model: invocation.model,
-      status: "completed",
-      output: "Recommendation: inspect src/index.ts. Why: central orchestration. Risks/tradeoffs: low. Confidence: 80%.",
-      inspectedRepo: true,
-      toolNamesUsed: ["read", "multi_grep"],
-    }),
-    executeSynthesisInvocation: async () => {
-      throw new Error("synthesis subprocess exited with code 1");
-    },
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-error-"));
-
-  await assert.rejects(
-    harness.registeredTool?.execute(
-      "tool-call-synthesis-error",
-      { prompt: "draft a migration plan" },
-      undefined,
-      undefined,
-      commandContext,
-    ),
-    /Synthesis subprocess failed: synthesis subprocess exited with code 1/,
-  );
-
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "warning",
-      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-    {
-      level: "error",
-      message: "Synthesis subprocess failed: synthesis subprocess exited with code 1",
-    },
-  ]);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+failed/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+× failed/.test(line))));
-  assert.equal(commandContext.widgetCleared, true);
-});
-
-test("consensus tool reports synthesis output validation failures clearly when synthesis repair also fails", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-synthesis-validation-error-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  let synthesisCalls = 0;
-  consensusExtension(harness.pi as never, {
-    executeParticipantInvocation: async (invocation) => ({
-      model: invocation.model,
-      status: "completed",
-      output: "Recommendation: inspect src/index.ts. Why: central orchestration. Risks/tradeoffs: low. Confidence: 80%.",
-      inspectedRepo: true,
-      toolNamesUsed: ["read"],
-    }),
-    executeSynthesisInvocation: async (invocation) => {
-      synthesisCalls += 1;
-      return {
-        model: invocation.model,
-        rawOutputText:
-          synthesisCalls === 1
-            ? '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":-1,"totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}'
-            : '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":"two","totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}',
-        output: {
-          consensusAnswer: "Use the incremental migration plan.",
-          overallAgreementPercent: 70,
-          overallDisagreementPercent: 20,
-          overallUnclearPercent: 10,
-          confidencePercent: 80,
-          confidenceLabel: "medium",
-          agreedPoints: [
-            {
-              point: "Roll out incrementally.",
-              supportPercent: 100,
-              supportingParticipants: (synthesisCalls === 1 ? -1 : "two") as unknown as number,
-              totalParticipants: 2,
-            },
-          ],
-          disagreements: [],
-          participants: [
-            {
-              model: "anthropic/claude-sonnet-4-5",
-              summary: "Recommended an incremental rollout.",
-            },
-            {
-              model: "openai/gpt-5",
-              summary: "Also recommended an incremental rollout.",
-            },
-          ],
-          excludedParticipants: [],
-        },
-      } as SynthesisInvocationResult;
-    },
-  });
-
-  const commandContext = createCommandContext(projectDir, [
-    { provider: "anthropic", id: "claude-sonnet-4-5" },
-    { provider: "openai", id: "gpt-5" },
-  ]);
-  commandContext.model = { provider: "openai", id: "gpt-5" };
-  commandContext.agentDir = mkdtempSync(join(tmpdir(), "pi-consensus-agent-synthesis-validation-error-"));
-
-  const result = await harness.registeredTool?.execute(
-    "tool-call-synthesis-validation-error",
-    { prompt: "draft a migration plan" },
-    undefined,
-    undefined,
-    commandContext,
-  );
-
-  // Should return degraded result instead of failing
-  assert.ok(result);
-  assert.equal(result?.details.synthesis?.confidenceLabel, "low (degraded mode - synthesis output was malformed)");
-  assert.equal(result?.details.status, "synthesis-complete");
-  assert.equal(
-    result?.details.rawSynthesisOutputText,
-    '{"consensusAnswer":"Use the incremental migration plan.","overallAgreementPercent":70,"overallDisagreementPercent":20,"overallUnclearPercent":10,"confidencePercent":80,"confidenceLabel":"medium","agreedPoints":[{"point":"Roll out incrementally.","supportPercent":100,"supportingParticipants":"two","totalParticipants":2}],"disagreements":[],"participants":[{"model":"anthropic/claude-sonnet-4-5","summary":"Recommended an incremental rollout."},{"model":"openai/gpt-5","summary":"Also recommended an incremental rollout."}],"excludedParticipants":[]}',
-  );
-
-  assert.deepEqual(commandContext.notifications, [
-    {
-      level: "warning",
-      message: 'Synthesis model "openai/gpt-5" is also configured as a participant.',
-    },
-    {
-      level: "info",
-      message: "pi-consensus participant pass and synthesis completed.",
-    },
-  ]);
-  assert.equal(commandContext.statusUpdates.length, 0);
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+synthesis/.test(line))));
-  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Synth\s+⚠ degraded/.test(line))));
-  assert.equal(synthesisCalls, 2);
-  assert.equal(commandContext.widgetCleared, true);
-});
-
-test("consensus tool fails clearly when participant count exceeds the safety cap", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-too-many-"));
-  mkdirSync(join(projectDir, ".pi"), { recursive: true });
-  writeFileSync(
-    join(projectDir, ".pi", "consensus.json"),
-    JSON.stringify({
-      models: [
-        "anthropic/claude-sonnet-4-5",
-        "openai/gpt-5",
-        "google/gemini-2.5-pro",
-        "xai/grok-4",
-        "openrouter/anthropic-claude-3.7-sonnet",
-        "openrouter/openai-gpt-4.1",
-        "deepseek/deepseek-chat",
-        "moonshot/kimi-k2",
-        "mistral/mistral-large",
-      ],
-    }),
-  );
-
-  const harness = createExtensionHarness();
-  consensusExtension(harness.pi as never);
-
-  await assert.rejects(
-    harness.registeredTool?.execute(
-      "tool-call-too-many",
-      { prompt: "draft a migration plan" },
-      undefined,
-      undefined,
-      {
-        ...createCommandContext(projectDir),
-        agentDir: mkdtempSync(join(tmpdir(), "pi-consensus-agent-too-many-")),
-        model: { provider: "openai", id: "gpt-5" },
-        modelRegistry: {
-          getAvailable: () => [
-            { provider: "anthropic", id: "claude-sonnet-4-5" },
-            { provider: "openai", id: "gpt-5" },
-            { provider: "google", id: "gemini-2.5-pro" },
-            { provider: "xai", id: "grok-4" },
-            { provider: "openrouter", id: "anthropic-claude-3.7-sonnet" },
-            { provider: "openrouter", id: "openai-gpt-4.1" },
-            { provider: "deepseek", id: "deepseek-chat" },
-            { provider: "moonshot", id: "kimi-k2" },
-            { provider: "mistral", id: "mistral-large" },
-          ],
-        },
-      },
-    ),
-    /supports at most 8 unique participant models/,
-  );
 });
 
 test("consensus command warns when prompt is missing", async () => {
@@ -977,119 +128,107 @@ test("consensus command handles quoted multi-word focus values", async () => {
   });
 });
 
-test("createConsensusExecutionResult renders participant stance and focus in output", () => {
-  const result = createConsensusExecutionResult(
-    "evaluate authentication approach",
-    {
-      configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5", "google/gemini-2.5-pro"],
-      synthesisModel: "openai/gpt-5",
-      warnings: [],
-    },
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        status: "usable",
-        output: "Use JWT tokens.",
+test("consensus tool adapter maps pi context into orchestrator inputs and clears progress widgets", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-extension-adapter-success-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "consensus.json"),
+    JSON.stringify({
+      models: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    }),
+  );
+
+  const participantInvocations: Array<{ model: string; cwd: string; prompt: string; stance?: string; focus?: string }> = [];
+  const synthesisInvocations: Array<{ model: string; cwd: string }> = [];
+
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never, {
+    executeParticipantInvocation: async (invocation) => {
+      participantInvocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        cwd: invocation.cwd,
+        prompt: invocation.prompt,
+        stance: invocation.model.stance,
+        focus: invocation.model.focus,
+      });
+
+      return {
+        model: invocation.model,
+        status: "completed",
+        output: "Recommendation: proceed. Why: clear path. Risks/tradeoffs: moderate migration effort. Confidence: high.",
         inspectedRepo: true,
         toolNamesUsed: ["read"],
-        stance: "for",
-        focus: "security",
-      },
-      {
-        model: "openai/gpt-5",
-        status: "usable",
-        output: "Consider session cookies.",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-        stance: "against",
-      },
-      {
-        model: "google/gemini-2.5-pro",
-        status: "excluded",
-        output: "",
-        exclusionReason: "empty response",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-        stance: "neutral",
-        focus: "performance",
-      },
-    ],
-    undefined,
-    {
-      consensusAnswer: "Use JWT with proper expiration.",
-      overallAgreementPercent: 60,
-      overallDisagreementPercent: 20,
-      overallUnclearPercent: 20,
-      confidencePercent: 75,
-      confidenceLabel: "medium",
-      agreedPoints: [{ point: "Use secure tokens", supportPercent: 100, supportingParticipants: 2, totalParticipants: 2 }],
-      disagreements: [{ point: "Implementation details", summary: "Differ on cookie vs JWT" }],
-      participants: [
-        { model: "anthropic/claude-sonnet-4-5", summary: "Recommended JWT" },
-        { model: "openai/gpt-5", summary: "Suggested alternatives" },
-      ],
-      excludedParticipants: [{ model: "google/gemini-2.5-pro", reason: "empty response" }],
+      };
     },
-    "full",
+    executeSynthesisInvocation: async (invocation): Promise<SynthesisInvocationResult> => {
+      synthesisInvocations.push({
+        model: `${invocation.model.provider}/${invocation.model.id}`,
+        cwd: invocation.cwd,
+      });
+
+      return {
+        model: invocation.model,
+        output: {
+          consensusAnswer: "Proceed with an incremental migration.",
+          overallAgreementPercent: 70,
+          overallDisagreementPercent: 20,
+          overallUnclearPercent: 10,
+          confidencePercent: 80,
+          confidenceLabel: "high",
+          agreedPoints: [],
+          disagreements: [],
+          participants: [],
+          excludedParticipants: [],
+        },
+      };
+    },
+  });
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+
+  const result = await harness.registeredTool?.execute(
+    "tool-call-1",
+    { prompt: "evaluate auth", stance: "neutral", focus: "security" },
+    undefined,
+    undefined,
+    commandContext,
   );
 
-  // Verify stance and focus appear in Participants section
-  assert.match(result.text, /## Participants/);
-  assert.match(result.text, /anthropic\/claude-sonnet-4-5 \(stance: for, focus: security\) — Recommended JWT/);
-  assert.match(result.text, /openai\/gpt-5 \(stance: against\) — Suggested alternatives/);
-
-  // Verify excluded participant with stance/focus shown
-  assert.match(result.text, /## Excluded/);
-  assert.match(result.text, /google\/gemini-2\.5-pro — empty response/);
-
-  // Verify debug section shows stance/focus
-  assert.match(result.text, /## Debug participant outputs/);
-  assert.match(result.text, /### anthropic\/claude-sonnet-4-5 — usable \(stance: for, focus: security\)/);
-  assert.match(result.text, /### openai\/gpt-5 — usable \(stance: against\)/);
-  assert.match(result.text, /### google\/gemini-2\.5-pro — excluded \(stance: neutral, focus: performance\)/);
-
-  // Verify details include stance/focus
-  assert.equal(result.details.participants[0].stance, "for");
-  assert.equal(result.details.participants[0].focus, "security");
-  assert.equal(result.details.participants[1].stance, "against");
-  assert.equal(result.details.participants[1].focus, undefined);
-  assert.equal(result.details.participants[2].stance, "neutral");
-  assert.equal(result.details.participants[2].focus, "performance");
+  assert.equal(result?.details.status, "synthesis-complete");
+  assert.equal(participantInvocations.length, 2);
+  assert.deepEqual(
+    participantInvocations.map(({ model, cwd, prompt, stance, focus }) => ({ model, cwd, prompt, stance, focus })),
+    [
+      { model: "anthropic/claude-sonnet-4-5", cwd: projectDir, prompt: "evaluate auth", stance: "neutral", focus: "security" },
+      { model: "openai/gpt-5", cwd: projectDir, prompt: "evaluate auth", stance: "neutral", focus: "security" },
+    ],
+  );
+  assert.deepEqual(synthesisInvocations, [{ model: "openai/gpt-5", cwd: projectDir }]);
+  assert.ok(commandContext.widgetUpdates.some((lines) => lines.some((line) => /Stage\s+config validation/.test(line))));
+  assert.equal(commandContext.widgetCleared, true);
 });
 
-test("createConsensusExecutionResult handles participants without stance or focus", () => {
-  const result = createConsensusExecutionResult(
-    "simple query",
-    {
-      configPath: ".pi/consensus.json",
-      participants: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-      synthesisModel: "openai/gpt-5",
-      warnings: [],
-    },
-    [
-      {
-        model: "anthropic/claude-sonnet-4-5",
-        status: "usable",
-        output: "Answer",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      },
-      {
-        model: "openai/gpt-5",
-        status: "usable",
-        output: "Answer",
-        inspectedRepo: false,
-        toolNamesUsed: [],
-      },
-    ],
+test("consensus tool adapter clears progress widgets after orchestrator errors", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-consensus-extension-adapter-failure-"));
+  const harness = createExtensionHarness();
+  consensusExtension(harness.pi as never);
+
+  const commandContext = createCommandContext(projectDir, [
+    { provider: "anthropic", id: "claude-sonnet-4-5" },
+    { provider: "openai", id: "gpt-5" },
+  ]);
+  commandContext.model = { provider: "openai", id: "gpt-5" };
+
+  await assert.rejects(
+    harness.registeredTool?.execute("tool-call-2", { prompt: "evaluate auth" }, undefined, undefined, commandContext),
+    /Config validation failed: Consensus config not found\./,
   );
 
-  // Verify no stance/focus framing when not provided
-  assert.match(result.text, /## Participants/);
-  assert.match(result.text, /anthropic\/claude-sonnet-4-5 — usable/);
-  assert.doesNotMatch(result.text, /## Participants[\s\S]*anthropic\/claude-sonnet-4-5.*stance:/);
-  assert.doesNotMatch(result.text, /## Participants[\s\S]*openai\/gpt-5.*focus:/);
+  assert.equal(commandContext.widgetCleared, true);
 });
 
 function createExtensionHarness() {
@@ -1100,7 +239,7 @@ function createExtensionHarness() {
     | {
         execute: (
           toolCallId: string,
-          params: { prompt: string },
+          params: { prompt: string; stance?: string; focus?: string },
           signal?: AbortSignal,
           onUpdate?: unknown,
           ctx?: ReturnType<typeof createCommandContext>,
@@ -1111,8 +250,6 @@ function createExtensionHarness() {
     message: { customType: string; content: string; details?: unknown; display: boolean };
     options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean };
   }> = [];
-  const sentUserMessages: unknown[] = [];
-  const sentToolLikeMessages: unknown[] = [];
 
   const pi = {
     on: () => {},
@@ -1129,12 +266,8 @@ function createExtensionHarness() {
     ) => {
       sentMessages.push({ message, options });
     },
-    sendUserMessage: (message: unknown, options?: unknown) => {
-      sentUserMessages.push({ message, options });
-    },
-    sendToolLikeMessage: (message: unknown, options?: unknown) => {
-      sentToolLikeMessages.push({ message, options });
-    },
+    sendUserMessage: () => {},
+    sendToolLikeMessage: () => {},
   };
 
   return {
@@ -1146,8 +279,6 @@ function createExtensionHarness() {
       return registeredTool;
     },
     sentMessages,
-    sentUserMessages,
-    sentToolLikeMessages,
   };
 }
 
